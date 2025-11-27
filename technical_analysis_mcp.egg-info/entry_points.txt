@@ -1,0 +1,2 @@
+[console_scripts]
+technical-analysis-mcp = technical_analysis_mcp.server:main
