@@ -277,6 +277,10 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+
+
+
+
 ---
 
 ### Static Universe Lists (No Database Needed)
@@ -312,6 +316,10 @@ UNIVERSES = {
 # pip install pandas-datareader
 # df = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]
 ```
+
+
+
+
 
 ---
 
