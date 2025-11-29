@@ -1,3 +1,4 @@
+# Dependencies
 # src/technical_analysis_mcp/server.py
 
 from mcp.server import Server
