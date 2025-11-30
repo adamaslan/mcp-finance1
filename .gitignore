@@ -49,7 +49,7 @@ package-lock.json
 # Misc
 *.seed
 *.seed.js
-*.md
+
 *.bak
 *.cache
 *.tmp
