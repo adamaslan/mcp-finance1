@@ -21,7 +21,7 @@ from google.cloud import firestore
 # Configuration
 USE_GCP = os.getenv("USE_GCP", "true").lower() == "true"
 CLOUD_RUN_URL = os.getenv("CLOUD_RUN_URL", "http://localhost:8080")
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "technical-analysis-prod")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 
 # Local cache (L1): 5 minute TTL
 LOCAL_CACHE = TTLCache(maxsize=100, ttl=300)

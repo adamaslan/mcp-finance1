@@ -15,7 +15,7 @@ import pandas as pd
 from google.cloud import firestore, pubsub_v1, storage
 
 # Initialize clients
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "technical-analysis-prod")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 BUCKET_NAME = os.getenv("BUCKET_NAME", "technical-analysis-data")
 
 db = firestore.Client(project=PROJECT_ID)

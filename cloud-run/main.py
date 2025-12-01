@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize GCP clients
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "technical-analysis-prod")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 BUCKET_NAME = os.getenv("BUCKET_NAME", "technical-analysis-data")
 
 db = firestore.Client(project=PROJECT_ID)
