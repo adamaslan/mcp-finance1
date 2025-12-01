@@ -15,7 +15,7 @@ from google.cloud import aiplatform, firestore, pubsub_v1
 from vertexai.preview.generative_models import GenerativeModel
 
 # Initialize clients
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "technical-analysis-prod")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 REGION = os.getenv("GCP_REGION", "us-central1")
 
 db = firestore.Client(project=PROJECT_ID)

@@ -298,7 +298,7 @@ import os
 from google.cloud import firestore
 from datetime import datetime
 
-PROJECT_ID = os.getenv("GCP_PROJECT_ID", "technical-analysis-prod")
+PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 
 db = firestore.Client(project=PROJECT_ID)
 
