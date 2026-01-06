@@ -77,6 +77,8 @@ def calculate_moving_averages(df: pd.DataFrame, periods: tuple[int, ...] = MA_PE
 def calculate_rsi(df: pd.DataFrame, period: int = RSI_PERIOD) -> pd.DataFrame:
     """Calculate Relative Strength Index.
 
+    Safe implementation that prevents division-by-zero in strong uptrends.
+
     Args:
         df: DataFrame with 'Close' column.
         period: RSI period (default 14).
@@ -90,7 +92,9 @@ def calculate_rsi(df: pd.DataFrame, period: int = RSI_PERIOD) -> pd.DataFrame:
     gain = delta.where(delta > 0, 0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-    rs = gain / loss
+    # Add small epsilon (1e-10) to prevent division by zero in strong uptrends
+    # where loss = 0 (prices only increase, no decreases)
+    rs = gain / (loss + 1e-10)
     result["RSI"] = 100 - (100 / (1 + rs))
 
     logger.debug("Calculated RSI with period %d", period)
@@ -343,3 +347,77 @@ def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     logger.info("Completed indicator calculations: %d columns", len(result.columns))
     return result
+
+
+def calculate_indicators_dict(df: pd.DataFrame) -> dict[str, float]:
+    """Extract all calculated indicators as a dictionary from the last row.
+
+    Used to get current indicator values for reporting and analysis.
+
+    Args:
+        df: DataFrame with all indicators calculated via calculate_all_indicators.
+
+    Returns:
+        Dictionary of indicator names to current values (last row).
+    """
+    if df.empty:
+        logger.warning("Cannot extract indicators from empty DataFrame")
+        return {}
+
+    latest = df.iloc[-1]
+    indicators = {}
+
+    # Core indicators
+    if "RSI" in df.columns:
+        indicators["rsi"] = float(latest["RSI"])
+    if "MACD" in df.columns:
+        indicators["macd"] = float(latest["MACD"])
+    if "MACD_Signal" in df.columns:
+        indicators["macd_signal"] = float(latest["MACD_Signal"])
+    if "MACD_Hist" in df.columns:
+        indicators["macd_hist"] = float(latest["MACD_Hist"])
+
+    # Moving averages
+    if "SMA_20" in df.columns:
+        indicators["sma20"] = float(latest["SMA_20"])
+    if "SMA_50" in df.columns:
+        indicators["sma50"] = float(latest["SMA_50"])
+    if "EMA_20" in df.columns:
+        indicators["ema20"] = float(latest["EMA_20"])
+
+    # Bollinger Bands
+    if "BB_Upper" in df.columns:
+        indicators["bb_upper"] = float(latest["BB_Upper"])
+    if "BB_Mid" in df.columns:
+        indicators["bb_mid"] = float(latest["BB_Mid"])
+    if "BB_Lower" in df.columns:
+        indicators["bb_lower"] = float(latest["BB_Lower"])
+
+    # Oscillators
+    if "Stoch_K" in df.columns:
+        indicators["stoch_k"] = float(latest["Stoch_K"])
+    if "Stoch_D" in df.columns:
+        indicators["stoch_d"] = float(latest["Stoch_D"])
+
+    # Trend indicators
+    if "ADX" in df.columns:
+        indicators["adx"] = float(latest["ADX"])
+    if "Plus_DI" in df.columns:
+        indicators["plus_di"] = float(latest["Plus_DI"])
+    if "Minus_DI" in df.columns:
+        indicators["minus_di"] = float(latest["Minus_DI"])
+
+    # Volatility
+    if "ATR" in df.columns:
+        indicators["atr"] = float(latest["ATR"])
+
+    # Volume
+    if "Volume_MA_20" in df.columns:
+        indicators["vol_avg"] = int(latest["Volume_MA_20"])
+    if "Volume" in df.columns:
+        indicators["volume"] = int(latest["Volume"])
+        if "Volume_MA_20" in df.columns:
+            indicators["vol_ratio"] = float(latest["Volume"] / latest["Volume_MA_20"])
+
+    logger.debug("Extracted %d indicator values", len(indicators))
+    return indicators

@@ -3,18 +3,27 @@ Daily Stock Analysis Cloud Function
 
 Automated technical analysis with Gemini AI ranking.
 Triggered by Cloud Scheduler via Pub/Sub.
+
+Uses the unified analysis library from src/technical_analysis_mcp/
+to ensure single source of truth for all analysis logic.
 """
 
 import functions_framework
 from google.cloud import firestore
-import google.generativeai as genai
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import json
 import os
+import sys
 from datetime import datetime
 import time
+
+# Add shared library to path
+sys.path.insert(0, '/workspace')
+
+from technical_analysis_mcp.analysis import StockAnalyzer
+from technical_analysis_mcp.exceptions import (
+    InvalidSymbolError,
+    DataFetchError,
+    InsufficientDataError,
+)
 
 # Configuration
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -23,11 +32,8 @@ PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
 # Initialize clients
 db = firestore.Client(project=PROJECT_ID) if PROJECT_ID else None
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
-else:
-    model = None
+# Initialize analyzer with AI enabled if API key available
+analyzer = StockAnalyzer(use_cache=True, use_ai=bool(GEMINI_API_KEY))
 
 # Default watchlist
 DEFAULT_WATCHLIST = [
@@ -340,51 +346,22 @@ def rule_based_score(signals: list) -> dict:
 
 
 def analyze_symbol(symbol: str) -> dict:
-    """Complete analysis for a single symbol."""
+    """Complete analysis for a single symbol using the unified analyzer.
+
+    This function is now a thin wrapper around the StockAnalyzer from
+    the technical_analysis_mcp library, ensuring single source of truth.
+    """
     try:
-        # Fetch data
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period='3mo')
-
-        if len(df) < 50:
-            return {
-                'symbol': symbol,
-                'error': f'Insufficient data: {len(df)} periods',
-                'timestamp': datetime.utcnow().isoformat()
-            }
-
-        # Calculate indicators
-        indicators = calculate_indicators(df)
-
-        # Detect signals
-        signals = detect_signals(indicators)
-
-        # AI ranking
-        ai_result = rank_with_gemini(symbol, indicators, signals)
-
+        result = analyzer.analyze(symbol, period='3mo')
+        return result
+    except (InvalidSymbolError, DataFetchError, InsufficientDataError) as e:
         return {
             'symbol': symbol,
-            'timestamp': datetime.utcnow().isoformat(),
-            'price': indicators['price'],
-            'change_pct': indicators['change_pct'],
-            'indicators': {
-                'rsi': indicators['rsi'],
-                'macd': indicators['macd'],
-                'adx': indicators['adx'],
-                'stoch_k': indicators['stoch_k'],
-                'vol_ratio': indicators['vol_ratio']
-            },
-            'signals': signals,
-            'signal_count': len(signals),
-            'ai_score': ai_result.get('score', 50),
-            'ai_outlook': ai_result.get('outlook', 'NEUTRAL'),
-            'ai_action': ai_result.get('action', 'HOLD'),
-            'ai_confidence': ai_result.get('confidence', 'LOW'),
-            'ai_summary': ai_result.get('summary', ''),
-            'ai_powered': ai_result.get('ai_powered', False)
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
         }
-
     except Exception as e:
+        print(f"Unexpected error analyzing {symbol}: {e}")
         return {
             'symbol': symbol,
             'error': str(e),
