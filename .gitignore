@@ -9,7 +9,7 @@ dist/
 build/
 .vercel/
 
-# Environment files
+# Environment files (SENSITIVE - never commit)
 .env
 .env.local
 .env.development
@@ -17,6 +17,31 @@ build/
 .env.production
 .env.staging
 .env.*.local
+*.env
+
+# GCP Credentials (SENSITIVE - never commit)
+*.json
+!package.json
+!tsconfig.json
+!*.schema.json
+service-account*.json
+credentials*.json
+*-key.json
+*-credentials.json
+
+# Terraform state (contains secrets)
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!*.tfvars.example
+
+# API Keys and Secrets
+secrets/
+.secrets/
+*.pem
+*.key
+*.crt
 
 # Logs
 logs/
