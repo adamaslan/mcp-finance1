@@ -22,8 +22,25 @@ except ImportError:
 
 sys.path.insert(0, 'src')
 
-from technical_analysis_mcp.server import analyze_security
+from technical_analysis_mcp.server import (
+    analyze_security,
+    compare_securities,
+    get_trade_plan,
+    morning_brief,
+    portfolio_risk,
+    scan_trades,
+    screen_securities,
+)
 from technical_analysis_mcp.config import GEMINI_API_KEY
+from technical_analysis_mcp.formatting import (
+    format_analysis,
+    format_comparison,
+    format_morning_brief,
+    format_portfolio_risk,
+    format_risk_analysis,
+    format_scan_results,
+    format_screening,
+)
 
 
 def print_header():
@@ -105,51 +122,7 @@ async def run_analysis(symbol: str, use_ai: bool = False):
     try:
         result = await analyze_security(symbol, period='3mo', use_ai=use_ai)
 
-        # Price and change
-        print(f"Price: ${result['price']:.2f} ({result['change']:+.2f}%)")
-        print(f"Timestamp: {result['timestamp']}")
-        print()
-
-        # Summary
-        print("SIGNAL SUMMARY")
-        print("-" * 70)
-        summary = result["summary"]
-        print(f"Total Signals: {summary['total_signals']}")
-        print(f"Bullish: {summary['bullish']} | Bearish: {summary['bearish']}")
-        print(f"Average Score: {summary['avg_score']:.1f}/100")
-        print()
-
-        # Key indicators
-        print("KEY INDICATORS")
-        print("-" * 70)
-        ind = result["indicators"]
-        print(f"RSI: {ind['rsi']:.2f}", end="")
-        if ind['rsi'] < 30:
-            print(" (OVERSOLD)", end="")
-        elif ind['rsi'] > 70:
-            print(" (OVERBOUGHT)", end="")
-        print()
-        print(f"MACD: {ind['macd']:.4f}")
-        print(f"ADX: {ind['adx']:.2f}", end="")
-        if ind['adx'] > 25:
-            print(" (TRENDING)", end="")
-        print()
-        print(f"Volume: {ind['volume']:,}")
-        print()
-
-        # Top signals
-        print(f"TOP {'AI-RANKED ' if use_ai else ''}SIGNALS")
-        print("-" * 70)
-        for i, signal in enumerate(result['signals'][:15], 1):
-            score = signal.get('ai_score', '-')
-            strength = signal['strength']
-            signal_name = signal['signal'][:35]
-            reasoning = signal.get('ai_reasoning', '')[:40]
-
-            print(f"{i:2d}. {signal_name:35s} [{strength:18s}] Score: {score:>3}")
-            if use_ai and reasoning and reasoning != "Rule-based score":
-                print(f"     └─ {reasoning}")
-
+        print(format_analysis(result))
         print()
         return result
 
@@ -158,12 +131,68 @@ async def run_analysis(symbol: str, use_ai: bool = False):
         raise
 
 
+def _parse_symbols(argv: list[str]) -> list[str]:
+    parts: list[str] = []
+    for arg in argv:
+        if arg.startswith("--"):
+            continue
+        parts.extend([p.strip() for p in arg.replace(",", " ").split()])
+    return [p.upper() for p in parts if p]
+
+
+async def run_report(symbols: list[str], use_ai: bool) -> None:
+    print("REPORT SYMBOLS")
+    print("-" * 70)
+    print(", ".join(symbols))
+    print()
+
+    for i in range(0, len(symbols), 10):
+        brief = await morning_brief(watchlist=symbols[i:i + 10], market_region="US")
+        print(format_morning_brief(brief))
+        print()
+
+    analyses: list[dict] = []
+    for symbol in symbols:
+        analyses.append(await run_analysis(symbol, use_ai=use_ai))
+
+    comparison = await compare_securities(symbols=symbols)
+    print(format_comparison(comparison))
+    print()
+
+    screening = await screen_securities(
+        universe="sp500",
+        criteria={"rsi": {"max": 40}, "min_score": 55},
+        limit=15,
+    )
+    print(format_screening(screening))
+    print()
+
+    scan = await scan_trades(universe="sp500", max_results=10)
+    print(format_scan_results(scan))
+    print()
+
+    positions = [
+        {"symbol": a["symbol"], "shares": 10, "entry_price": a["price"]}
+        for a in analyses
+        if a and isinstance(a, dict) and "symbol" in a and "price" in a
+    ]
+    if positions:
+        portfolio = await portfolio_risk(positions=positions)
+        print(format_portfolio_risk(portfolio))
+        print()
+
+    for symbol in symbols:
+        plan = await get_trade_plan(symbol=symbol, period="3mo")
+        print(format_risk_analysis(plan))
+        print()
+
+
 async def main():
     """Main entry point."""
     print_header()
 
-    # Get symbol from command line or default to MU
-    symbol = sys.argv[1] if len(sys.argv) > 1 else "MU"
+    default_symbols = ["RGTI", "QBTS", "LLY", "C", "AEM", "SLV", "TLRY", "SMCI", "ORCL", "GLD", "MU"]
+    symbols = _parse_symbols(sys.argv[1:]) or default_symbols
 
     # Verify setup
     has_api_key = verify_setup()
@@ -181,7 +210,7 @@ async def main():
         print("📊 AI Ranking: DISABLED (using rule-based scoring)")
     print()
 
-    await run_analysis(symbol, use_ai=use_ai)
+    await run_report(symbols, use_ai=use_ai)
 
     print("=" * 70)
     print("  ANALYSIS COMPLETE")
