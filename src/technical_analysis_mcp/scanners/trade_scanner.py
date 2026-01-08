@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 from ..data import CachedDataFetcher
@@ -53,7 +54,7 @@ class TradeScanner:
                 "universe": universe,
                 "total_scanned": 0,
                 "qualified_trades": [],
-                "timestamp": "",
+                "timestamp": datetime.now().isoformat(),
                 "duration_seconds": 0,
             }
 
@@ -100,7 +101,7 @@ class TradeScanner:
             "universe": universe,
             "total_scanned": len(symbols),
             "qualified_trades": qualified_trades[:max_results],
-            "timestamp": time.time(),
+            "timestamp": datetime.now().isoformat(),
             "duration_seconds": duration,
         }
 

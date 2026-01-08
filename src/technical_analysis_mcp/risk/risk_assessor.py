@@ -344,10 +344,10 @@ class RiskAssessor:
                 atr=0, atr_percent=0, volatility_regime="medium",
                 adx=0, is_trending=False, bb_width_percent=0, volume_ratio=1.0
             ),
-            stop=None,  # type: ignore
-            target=None,  # type: ignore
+            stop=None,
+            target=None,
             invalidation=None,
-            risk_reward=None,  # type: ignore
+            risk_reward=None,
             is_qualified=False,
             risk_quality=RiskQuality.LOW,
             suppressions=(reason,),

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from ..data import CachedDataFetcher
@@ -45,7 +46,7 @@ class PortfolioRiskAssessor:
                 "correlation_matrix": None,
                 "overall_risk_level": "LOW",
                 "hedge_suggestions": [],
-                "timestamp": "",
+                "timestamp": datetime.now().isoformat(),
             }
 
         logger.info("Assessing %d positions", len(positions))
@@ -79,7 +80,7 @@ class PortfolioRiskAssessor:
                 "correlation_matrix": None,
                 "overall_risk_level": "LOW",
                 "hedge_suggestions": [],
-                "timestamp": "",
+                "timestamp": datetime.now().isoformat(),
             }
 
         # Calculate aggregate metrics
@@ -109,7 +110,7 @@ class PortfolioRiskAssessor:
             "correlation_matrix": None,  # Simplified: skip correlation for now
             "overall_risk_level": overall_risk_level,
             "hedge_suggestions": hedge_suggestions,
-            "timestamp": "",
+            "timestamp": datetime.now().isoformat(),
         }
 
     async def _assess_single_position(self, position: dict[str, Any]) -> dict[str, Any]:

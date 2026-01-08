@@ -147,13 +147,13 @@ class RiskAssessment(BaseModel):
     # Risk metrics
     metrics: RiskMetrics
 
-    # Calculated levels
-    stop: StopLevel
-    target: TargetLevel
-    invalidation: InvalidationLevel | None
+    # Calculated levels (optional for error cases)
+    stop: StopLevel | None = None
+    target: TargetLevel | None = None
+    invalidation: InvalidationLevel | None = None
 
-    # R:R
-    risk_reward: RiskReward
+    # R:R (optional for error cases)
+    risk_reward: RiskReward | None = None
 
     # Overall assessment
     is_qualified: bool  # Did it pass risk checks?
