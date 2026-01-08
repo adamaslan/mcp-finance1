@@ -45,10 +45,10 @@ class MorningBriefGenerator:
         else:
             watchlist = watchlist[:10]  # Limit to 10 symbols
 
-        logger.info("Generating morning brief for %d watchlist symbols", len(watchlist))
+        logger.info("Generating morning brief for %d watchlist symbols in %s", len(watchlist), market_region)
 
         # Gather market info in parallel
-        market_status = self._market_checker.get_market_status()
+        market_status = self._market_checker.get_market_status(market_region)
         economic_events = self._calendar.get_todays_events()
 
         # Analyze watchlist symbols
