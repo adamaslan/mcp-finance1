@@ -15,9 +15,13 @@ from mcp.types import TextContent, Tool
 from .config import DEFAULT_PERIOD, MAX_SIGNALS_RETURNED, MAX_SYMBOLS_COMPARE
 from .data import AnalysisResultCache, CachedDataFetcher, DataFetcher
 from .exceptions import DataFetchError, TechnicalAnalysisError
-from .formatting import format_analysis, format_comparison, format_screening
+from .briefing import MorningBriefGenerator
+from .formatting import format_analysis, format_comparison, format_screening, format_risk_analysis, format_scan_results, format_portfolio_risk, format_morning_brief
 from .indicators import calculate_all_indicators
+from .portfolio import PortfolioRiskAssessor
 from .ranking import RankingStrategy, get_ranking_strategy, rank_signals
+from .risk import RiskAssessor
+from .scanners import TradeScanner
 from .signals import detect_all_signals
 from .universes import UNIVERSES
 
@@ -117,6 +121,97 @@ async def list_tools() -> list[Tool]:
                 "required": ["criteria"],
             },
         ),
+        Tool(
+            name="get_trade_plan",
+            description="Get risk-qualified trade plan (1-3 max) with suppression reasons if not tradeable",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Ticker symbol (e.g., AAPL, MSFT)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (1mo, 3mo, 6mo, 1y)",
+                    },
+                },
+                "required": ["symbol"],
+            },
+        ),
+        Tool(
+            name="scan_trades",
+            description="Scan universe for qualified trade setups (1-10 per universe)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "universe": {
+                        "type": "string",
+                        "default": "sp500",
+                        "description": "Universe to scan (sp500, nasdaq100, etf_large_cap, crypto)",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Maximum results (1-50)",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="portfolio_risk",
+            description="Assess aggregate risk across your positions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "positions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "symbol": {
+                                    "type": "string",
+                                    "description": "Ticker symbol",
+                                },
+                                "shares": {
+                                    "type": "number",
+                                    "description": "Number of shares",
+                                },
+                                "entry_price": {
+                                    "type": "number",
+                                    "description": "Entry price per share",
+                                },
+                            },
+                            "required": ["symbol", "shares", "entry_price"],
+                        },
+                        "description": "List of open positions",
+                    },
+                },
+                "required": ["positions"],
+            },
+        ),
+        Tool(
+            name="morning_brief",
+            description="Generate daily market briefing with signals and market conditions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "watchlist": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Symbols to analyze (default: top 10 tech/finance stocks)",
+                    },
+                    "market_region": {
+                        "type": "string",
+                        "default": "US",
+                        "description": "Market region (US, EU, ASIA)",
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -135,6 +230,22 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         if name == "screen_securities":
             result = await screen_securities(**arguments)
             return [TextContent(type="text", text=format_screening(result))]
+
+        if name == "get_trade_plan":
+            result = await get_trade_plan(**arguments)
+            return [TextContent(type="text", text=format_risk_analysis(result))]
+
+        if name == "scan_trades":
+            result = await scan_trades(**arguments)
+            return [TextContent(type="text", text=format_scan_results(result))]
+
+        if name == "portfolio_risk":
+            result = await portfolio_risk(**arguments)
+            return [TextContent(type="text", text=format_portfolio_risk(result))]
+
+        if name == "morning_brief":
+            result = await morning_brief(**arguments)
+            return [TextContent(type="text", text=format_morning_brief(result))]
 
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -364,6 +475,155 @@ def _meets_criteria(analysis: dict[str, Any], criteria: dict[str, Any]) -> bool:
             return False
 
     return True
+
+
+async def get_trade_plan(
+    symbol: str,
+    period: str = DEFAULT_PERIOD,
+) -> dict[str, Any]:
+    """Generate risk-qualified trade plan(s) for a security.
+
+    Reuses existing data fetching, indicator, and signal pipeline,
+    then applies risk assessment to produce 1-3 trade plans or suppression reasons.
+
+    Args:
+        symbol: Ticker symbol.
+        period: Time period for analysis.
+
+    Returns:
+        RiskAnalysisResult with trade plans or suppression reasons.
+    """
+    symbol = symbol.upper().strip()
+
+    logger.info("Getting trade plan for %s (period: %s)", symbol, period)
+
+    # Reuse existing pipeline
+    fetcher = get_data_fetcher()
+    df = fetcher.fetch(symbol, period)
+
+    df = calculate_all_indicators(df)
+
+    signals = detect_all_signals(df)
+
+    current = df.iloc[-1]
+    market_data = {
+        "price": float(current["Close"]),
+        "change": float(current.get("Price_Change", 0)),
+    }
+
+    # Rank signals (rule-based only, no AI for simplicity)
+    ranked_signals = rank_signals(
+        signals=signals,
+        symbol=symbol,
+        market_data=market_data,
+        use_ai=False,
+    )
+
+    # Apply risk assessment
+    risk_assessor = RiskAssessor()
+    result = risk_assessor.assess(df, ranked_signals, symbol)
+
+    logger.info(
+        "Trade plan for %s: has_trades=%s, suppressions=%d",
+        symbol,
+        result.has_trades,
+        len(result.all_suppressions),
+    )
+
+    # Convert to dict for consistency with other endpoints
+    return result.model_dump()
+
+
+async def scan_trades(
+    universe: str = "sp500",
+    max_results: int = 10,
+) -> dict[str, Any]:
+    """Scan universe for qualified trade setups.
+
+    Scans all symbols in the specified universe in parallel,
+    identifies those with qualified trade plans, ranks by quality,
+    and returns the top results.
+
+    Args:
+        universe: Universe to scan (sp500, nasdaq100, etf_large_cap, crypto).
+        max_results: Maximum results to return (1-50).
+
+    Returns:
+        Scan results with qualified setups.
+    """
+    logger.info("Scanning %s universe for trades (max_results: %d)", universe, max_results)
+
+    scanner = TradeScanner(max_concurrent=10)
+    result = await scanner.scan_universe(universe, max_results, period="1mo")
+
+    logger.info(
+        "Scan complete for %s: found %d qualified trades from %d scanned",
+        universe,
+        len(result.get("qualified_trades", [])),
+        result.get("total_scanned", 0),
+    )
+
+    return result
+
+
+async def portfolio_risk(
+    positions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Assess aggregate risk across portfolio positions.
+
+    Analyzes each position for stop levels and risk metrics,
+    then calculates portfolio-level metrics including sector concentration
+    and hedge suggestions.
+
+    Args:
+        positions: List of position dicts with symbol, shares, entry_price.
+
+    Returns:
+        Portfolio risk assessment with aggregate and position-level metrics.
+    """
+    logger.info("Assessing portfolio risk across %d positions", len(positions))
+
+    assessor = PortfolioRiskAssessor()
+    result = await assessor.assess_positions(positions)
+
+    logger.info(
+        "Portfolio assessment complete: total_value=%.2f, max_loss=%.2f, risk_level=%s",
+        result.get("total_value", 0),
+        result.get("total_max_loss", 0),
+        result.get("overall_risk_level", "UNKNOWN"),
+    )
+
+    return result
+
+
+async def morning_brief(
+    watchlist: list[str] | None = None,
+    market_region: str = "US",
+) -> dict[str, Any]:
+    """Generate daily market briefing with signals and market conditions.
+
+    Analyzes market status, economic events, and watchlist signals
+    to produce a comprehensive morning briefing.
+
+    Args:
+        watchlist: Optional list of symbols (default: top tech/finance stocks).
+        market_region: Market region (US, EU, ASIA).
+
+    Returns:
+        Morning brief with market status, events, signals, and themes.
+    """
+    logger.info("Generating morning brief for region: %s", market_region)
+
+    generator = MorningBriefGenerator()
+    result = await generator.generate_brief(watchlist, market_region)
+
+    logger.info(
+        "Morning brief complete: %d symbols analyzed, %d themes detected",
+        len(result.get("watchlist_signals", [])),
+        len(result.get("key_themes", [])),
+    )
+
+    return result
 
 
 def main() -> None:
