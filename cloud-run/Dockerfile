@@ -1,33 +1,35 @@
-# Stage 1: Builder - Install dependencies
-FROM python:3.11-slim AS builder
+# Stage 1: Build - Install dependencies using micromamba
+FROM mambaorg/micromamba:1.5.6 as builder
 
-WORKDIR /app
+# Copy environment file with correct ownership
+COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/environment.yml
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create environment in base (faster than creating new named environment)
+RUN micromamba install -y -n base -f /tmp/environment.yml && \
+    micromamba clean --all --yes
 
 # Stage 2: Runtime - Minimal production image
-FROM python:3.11-slim
+FROM mambaorg/micromamba:1.5.6
 
+# Copy installed environment from builder
+COPY --from=builder /opt/conda /opt/conda
+
+# Set working directory
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy application code
-COPY *.py ./
+# Copy application code with correct ownership
+# CRITICAL: --chown ensures non-root ownership
+COPY --chown=$MAMBA_USER:$MAMBA_USER *.py ./
+COPY --chown=$MAMBA_USER:$MAMBA_USER src ./src
 
 # Environment configuration
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 
+# Container runs as 'mambauser' (UID 1000) by default - NOT ROOT
+# The mambaorg/micromamba base image already sets USER mambauser
+
+# Expose port (non-privileged port)
 EXPOSE 8080
 
 # Health check
@@ -35,4 +37,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Using micromamba's shell initialization to ensure conda environment is active
+CMD ["python", "main.py"]

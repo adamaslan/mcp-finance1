@@ -1,0 +1,22 @@
+# Test logs and flows
+logs/
+*.log
+*.json
+
+# Pytest cache
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
