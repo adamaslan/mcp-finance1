@@ -41,6 +41,10 @@ UNIVERSES: Final[dict[str, list[str]]] = {
         "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
         "AMD", "INTC", "CRM", "ADBE", "ORCL", "IBM", "CSCO",
     ],
+
+    "beta1": [
+        "MU", "GLD", "NVDA", "RGTI", "RR", "PL", "GEV", "GOOG", "IBIT", "LICX", "APLD",
+    ],
 }
 
 
