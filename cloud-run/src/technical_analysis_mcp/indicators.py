@@ -388,8 +388,8 @@ def calculate_indicators_dict(df: pd.DataFrame) -> dict[str, float]:
     # Bollinger Bands
     if "BB_Upper" in df.columns:
         indicators["bb_upper"] = float(latest["BB_Upper"])
-    if "BB_Mid" in df.columns:
-        indicators["bb_mid"] = float(latest["BB_Mid"])
+    if "BB_Middle" in df.columns:
+        indicators["bb_mid"] = float(latest["BB_Middle"])
     if "BB_Lower" in df.columns:
         indicators["bb_lower"] = float(latest["BB_Lower"])
 

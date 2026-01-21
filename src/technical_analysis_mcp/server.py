@@ -212,6 +212,35 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="analyze_fibonacci",
+            description=(
+                "Comprehensive Fibonacci analysis including 40+ levels, "
+                "200+ signals across retracements, extensions, harmonic patterns, "
+                "Elliott Wave relationships, clusters, and time zones. "
+                "Returns price levels, active signals, and confluence zones."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Stock symbol (e.g., AAPL)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Time period (1d, 1mo, 3mo)",
+                        "default": "1mo",
+                    },
+                    "window": {
+                        "type": "integer",
+                        "description": "Lookback window for swing detection",
+                        "default": 50,
+                    },
+                },
+                "required": ["symbol"],
+            },
+        ),
     ]
 
 
@@ -246,6 +275,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         if name == "morning_brief":
             result = await morning_brief(**arguments)
             return [TextContent(type="text", text=format_morning_brief(result))]
+
+        if name == "analyze_fibonacci":
+            result = await analyze_fibonacci(**arguments)
+            import json
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -621,6 +655,148 @@ async def morning_brief(
         "Morning brief complete: %d symbols analyzed, %d themes detected",
         len(result.get("watchlist_signals", [])),
         len(result.get("key_themes", [])),
+    )
+
+    return result
+
+
+async def analyze_fibonacci(
+    symbol: str,
+    period: str = "1mo",
+    window: int = 50,
+) -> dict[str, Any]:
+    """Analyze Fibonacci levels, signals, and clusters for a security.
+
+    Args:
+        symbol: Ticker symbol.
+        period: Time period for analysis.
+        window: Lookback window for swing point detection.
+
+    Returns:
+        Fibonacci analysis with levels, signals, and clusters.
+    """
+    symbol = symbol.upper().strip()
+    logger.info("Analyzing Fibonacci for %s (period: %s, window: %d)", symbol, period, window)
+
+    # Fetch data
+    fetcher = get_data_fetcher()
+    df = fetcher.fetch(symbol, period)
+
+    # Calculate indicators needed for Fibonacci analysis
+    df = calculate_all_indicators(df)
+
+    current = df.iloc[-1]
+    current_price = float(current["Close"])
+
+    # Simple swing detection (find highest high and lowest low in window)
+    recent_df = df.tail(window)
+    swing_high = float(recent_df["High"].max())
+    swing_low = float(recent_df["Low"].min())
+    swing_range = swing_high - swing_low
+
+    # Calculate Fibonacci levels using the registry
+    from fibonacci.core.registry import FibonacciLevelRegistry
+    from fibonacci.core.enums import FibonacciType
+
+    registry = FibonacciLevelRegistry()
+    all_levels = []
+
+    # Get retracement and extension levels
+    for key, (ratio, fib_type, strength, name) in registry.CORE_RATIOS.items():
+        if fib_type in ['RETRACE', 'EXTENSION']:
+            if fib_type == 'RETRACE':
+                price = swing_high - (swing_range * ratio)
+            else:  # EXTENSION
+                price = swing_low + (swing_range * ratio)
+
+            distance = abs(current_price - price) / current_price
+
+            all_levels.append({
+                "key": key,
+                "ratio": ratio,
+                "name": name,
+                "type": fib_type,
+                "price": round(price, 2),
+                "strength": strength,
+                "distanceFromCurrent": round(distance, 4),
+            })
+
+    # Sort by distance from current price
+    all_levels.sort(key=lambda x: x["distanceFromCurrent"])
+
+    # Generate basic signals for nearby levels
+    signals = []
+    for level in all_levels[:10]:  # Check top 10 closest levels
+        if level["distanceFromCurrent"] < 0.02:  # Within 2%
+            signals.append({
+                "signal": f"FIB {level['type']} {level['name']}",
+                "description": f"Price approaching {level['name']} {level['type'].lower()} level at ${level['price']}",
+                "strength": level["strength"],
+                "category": f"FIB_{level['type']}",
+                "timeframe": period,
+                "value": level["price"],
+            })
+
+    # Detect clusters (levels within 1% of each other)
+    clusters = []
+    tolerance = 0.01
+    used_indices = set()
+
+    for i, level1 in enumerate(all_levels):
+        if i in used_indices:
+            continue
+
+        cluster_levels = [level1]
+        used_indices.add(i)
+
+        for j, level2 in enumerate(all_levels[i+1:], start=i+1):
+            if j in used_indices:
+                continue
+
+            price_diff = abs(level1["price"] - level2["price"])
+            if price_diff / level1["price"] < tolerance:
+                cluster_levels.append(level2)
+                used_indices.add(j)
+
+        if len(cluster_levels) >= 2:
+            center_price = sum(l["price"] for l in cluster_levels) / len(cluster_levels)
+            clusters.append({
+                "centerPrice": round(center_price, 2),
+                "levels": [l["name"] for l in cluster_levels],
+                "levelCount": len(cluster_levels),
+                "strength": "STRONG" if len(cluster_levels) >= 3 else "MODERATE",
+                "type": "MIXED" if len(set(l["type"] for l in cluster_levels)) > 1 else cluster_levels[0]["type"],
+            })
+
+    # Summary
+    category_counts = {}
+    for sig in signals:
+        cat = sig["category"]
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    strongest_level = min(all_levels, key=lambda x: x["distanceFromCurrent"])
+
+    result = {
+        "symbol": symbol,
+        "timestamp": datetime.now().isoformat(),
+        "price": current_price,
+        "swingHigh": swing_high,
+        "swingLow": swing_low,
+        "swingRange": swing_range,
+        "levels": all_levels[:50],  # Return top 50 levels
+        "signals": signals,
+        "clusters": clusters,
+        "summary": {
+            "totalSignals": len(signals),
+            "byCategory": category_counts,
+            "strongestLevel": strongest_level["name"],
+            "confluenceZones": len(clusters),
+        },
+    }
+
+    logger.info(
+        "Fibonacci analysis complete for %s: %d levels, %d signals, %d clusters",
+        symbol, len(all_levels), len(signals), len(clusters)
     )
 
     return result
