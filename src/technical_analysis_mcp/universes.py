@@ -8,12 +8,31 @@ from typing import Final
 
 UNIVERSES: Final[dict[str, list[str]]] = {
     "sp500": [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B",
-        "UNH", "XOM", "JNJ", "JPM", "V", "PG", "MA", "HD", "CVX", "MRK",
-        "ABBV", "KO", "AVGO", "PEP", "COST", "WMT", "LLY", "MCD", "TMO",
-        "ACN", "ABT", "CSCO", "DHR", "CRM", "ADBE", "NKE", "TXN", "PM",
-        "NEE", "DIS", "VZ", "NFLX", "CMCSA", "BMY", "WFC", "INTC", "UPS",
-        "AMD", "HON", "QCOM", "UNP", "LIN", "ORCL", "BA", "COP", "IBM",
+        "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG", "AVGO", "META", "TSLA", "BRK.B",
+        "WMT", "LLY", "JPM", "V", "ORCL", "XOM", "JNJ", "MA", "COST", "MU",
+        "PLTR", "BAC", "ABBV", "HD", "AMD", "NFLX", "GE", "PG", "CVX", "KO",
+        "CAT", "UNH", "MS", "CSCO", "GS", "IBM", "LRCX", "WFC", "RTX", "PM",
+        "MRK", "AMAT", "AXP", "TMO", "INTC", "MCD", "CRM", "ABT", "TMUS", "C",
+        "KLAC", "LIN", "PEP", "DIS", "BA", "APP", "ISRG", "APH", "GEV", "SCHW",
+        "BLK", "AMGN", "UBER", "ACN", "TJX", "NEE", "TXN", "QCOM", "DHR", "T",
+        "SPGI", "BKNG", "VZ", "ANET", "LOW", "GILD", "COF", "INTU", "ADI", "PFE",
+        "DE", "HON", "SYK", "UNP", "LMT", "NOW", "ETN", "WELL", "PANW", "BSX",
+        "BX", "NEM", "MDT", "PLD", "ADBE", "COP", "PH", "PGR", "CB", "KKR",
+        "CRWD", "BMY", "VRTX", "CEG", "HCA", "SBUX", "ADP", "MCK", "MO", "CMCSA",
+        "CME", "CVS", "GD", "ICE", "SNPS", "SO", "HOOD", "MCO", "NKE", "NOC",
+        "DUK", "UPS", "HWM", "PNC", "MRSH", "MMM", "WM", "SHW", "DASH", "MAR",
+        "CDNS", "TT", "AMT", "USB", "FCX", "EMR", "APO", "BK", "ELV", "CRH",
+        "TDG", "GLW", "ORLY", "CMI", "DELL", "ABNB", "CTAS", "EQIX", "ECL", "REGN",
+        "ITW", "MNST", "WDC", "GM", "RCL", "WMB", "AON", "MDLZ", "CI", "FDX",
+        "STX", "WBD", "TEL", "JCI", "HLT", "SLB", "PWR", "COR", "CL", "CSX",
+        "MSI", "AJG", "RSG", "NSC", "COIN", "LHX", "AEP", "TFC", "PCAR", "CVNA",
+        "ROST", "KMI", "SNDK", "SRE", "SPG", "TRV", "NXPI", "APD", "BDX", "URI",
+        "AZO", "NDAQ", "AFL", "EOG", "IDXX", "VST", "O", "ADSK", "DLR", "FTNT",
+        "VLO", "PSX", "ZTS", "F", "PYPL", "CMG", "MPC", "D", "PSA", "EA",
+        "BKR", "CBRE", "GWW", "MET", "AXON", "CAH", "TGT", "ALL", "FAST", "AME",
+        "MPWR", "WDAY", "EW", "CARR", "AMP", "CTVA", "OKE", "ROK", "DAL", "DHI",
+        "MSCI", "EXC", "ROP", "XEL", "YUM", "TTWO", "FANG", "ETR", "OXY", "EBAY",
+        "DDOG", "EL", "CTSH", "GRMN", "IQV", "VMC", "MCHP", "HSY", "XYZ", "KR",
     ],
 
     "nasdaq100": [
@@ -40,6 +59,10 @@ UNIVERSES: Final[dict[str, list[str]]] = {
     "tech_leaders": [
         "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
         "AMD", "INTC", "CRM", "ADBE", "ORCL", "IBM", "CSCO",
+    ],
+
+    "beta1": [
+        "MU", "GLD", "NVDA", "RGTI", "RR", "PL", "GEV", "GOOG", "IBIT", "LRCX", "APLD",
     ],
 }
 

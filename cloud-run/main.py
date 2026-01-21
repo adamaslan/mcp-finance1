@@ -15,18 +15,56 @@ import json
 import hashlib
 import logging
 import os
+import sys
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize GCP clients
-PROJECT_ID = os.environ["GCP_PROJECT_ID"]
+# Add MCP server to path for importing
+# Try multiple paths for different deployment scenarios
+for path in ['/app/src', '/workspace/src', '../src', './src']:
+    if os.path.isdir(path):
+        sys.path.insert(0, path)
+        logger.info(f"Added {path} to Python path")
+        break
+
+# Try to import MCP server functions for direct analysis
+try:
+    from technical_analysis_mcp.server import (
+        get_trade_plan as mcp_get_trade_plan,
+        scan_trades as mcp_scan_trades,
+        portfolio_risk as mcp_portfolio_risk,
+        morning_brief as mcp_morning_brief,
+        analyze_fibonacci as mcp_analyze_fibonacci,
+    )
+    MCP_AVAILABLE = True
+    logger.info("✅ MCP server functions imported successfully")
+except ImportError as e:
+    logger.warning(f"⚠️ MCP server functions not available: {e}")
+    logger.error("❌ MCP server required - no mock data allowed")
+    MCP_AVAILABLE = False
+    mcp_get_trade_plan = None
+    mcp_scan_trades = None
+    mcp_portfolio_risk = None
+    mcp_morning_brief = None
+    mcp_analyze_fibonacci = None
+
+# Initialize GCP clients (optional for local testing)
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "ttb-lang1")
 BUCKET_NAME = os.getenv("BUCKET_NAME", "technical-analysis-data")
 
-db = firestore.Client(project=PROJECT_ID)
-storage_client = storage.Client(project=PROJECT_ID)
-publisher = pubsub_v1.PublisherClient()
+try:
+    db = firestore.Client(project=PROJECT_ID)
+    storage_client = storage.Client(project=PROJECT_ID)
+    publisher = pubsub_v1.PublisherClient()
+    logger.info("✅ GCP clients initialized")
+except Exception as e:
+    logger.warning(f"⚠️ GCP clients not available (local testing mode): {e}")
+    db = None
+    storage_client = None
+    publisher = None
 
 # FastAPI app
 app = FastAPI(
@@ -62,6 +100,31 @@ class ScreenRequest(BaseModel):
     symbols: List[str] = Field(...)
     criteria: Dict[str, Any] = Field(...)
     limit: int = Field(20, ge=1, le=100)
+
+class TradePlanRequest(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol")
+    period: str = Field("1mo", description="Time period")
+
+class ScanRequest(BaseModel):
+    universe: str = Field("sp500", description="Universe to scan")
+    max_results: int = Field(10, ge=1, le=50, description="Max results")
+
+class PortfolioPosition(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol")
+    shares: float = Field(..., description="Number of shares")
+    entry_price: float = Field(..., description="Entry price per share")
+
+class PortfolioRiskRequest(BaseModel):
+    positions: List[PortfolioPosition] = Field(..., description="Portfolio positions")
+
+class MorningBriefRequest(BaseModel):
+    watchlist: Optional[List[str]] = Field(None, description="Symbols to analyze")
+    market_region: str = Field("US", description="Market region")
+
+class FibonacciRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
+    period: str = Field("1d", description="Time period (1d, 1mo, 3mo)")
+    window: int = Field(50, description="Lookback window for swing detection")
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -340,6 +403,115 @@ async def get_screen_results(cache_key: str):
         }
     
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# TRADE PLANS, SCANNING, PORTFOLIO & BRIEFING (Direct MCP)
+# ============================================================================
+
+@app.post("/api/trade-plan")
+async def trade_plan(request: TradePlanRequest):
+    """Get risk-qualified trade plan for a symbol"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        result = await mcp_get_trade_plan(
+            symbol=request.symbol,
+            period=request.period
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Trade plan error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scan")
+async def scan(request: ScanRequest):
+    """Scan universe for qualified trade setups"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        result = await mcp_scan_trades(
+            universe=request.universe,
+            max_results=request.max_results
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Scan error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/portfolio-risk")
+async def portfolio_risk_endpoint(request: PortfolioRiskRequest):
+    """Assess aggregate portfolio risk"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        # Convert Pydantic models to dicts for MCP function
+        positions = [p.model_dump() for p in request.positions]
+        result = await mcp_portfolio_risk(positions=positions)
+        return result
+    except Exception as e:
+        logger.error(f"Portfolio risk error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/morning-brief")
+async def morning_brief_endpoint(request: MorningBriefRequest):
+    """Generate daily market briefing"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        result = await mcp_morning_brief(
+            watchlist=request.watchlist,
+            market_region=request.market_region
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Morning brief error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/fibonacci")
+async def fibonacci_analysis(request: FibonacciRequest):
+    """Comprehensive Fibonacci analysis with levels, signals, and clusters.
+
+    Returns 40+ Fibonacci levels, 200+ signals across categories,
+    confluence zones, and multi-timeframe validation.
+    """
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        logger.info(f"Fibonacci analysis requested for {request.symbol} (period: {request.period})")
+        result = await mcp_analyze_fibonacci(
+            symbol=request.symbol,
+            period=request.period,
+            window=request.window
+        )
+        logger.info(f"Fibonacci analysis completed for {request.symbol}: {len(result.get('levels', []))} levels, {len(result.get('signals', []))} signals")
+        return result
+    except Exception as e:
+        logger.error(f"Fibonacci analysis error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

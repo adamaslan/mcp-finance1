@@ -1,0 +1,57 @@
+name: mcp-finance-backend
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python version (explicit pin for reproducibility)
+  - python=3.11
+
+  # Web Framework
+  - fastapi>=0.104.1
+  - uvicorn>=0.24.0
+  - pydantic>=2.5.0
+
+  # HTTP Client
+  - httpx>=0.25.0
+
+  # Data Processing
+  - numpy>=1.24.0
+  - pandas>=2.0.0
+
+  # Date/Time Utilities
+  - python-dateutil>=2.8.2
+
+  # Caching and Utilities
+  - cachetools>=5.0.0
+
+  # Database/Storage
+  - psycopg2>=2.9.0  # PostgreSQL driver for future use
+
+  # Development Tools
+  - pytest>=7.4.0
+  - pytest-asyncio>=0.21.0
+  - black>=23.0.0
+  - ruff>=0.1.0
+  - mypy>=1.5.0
+
+  # Logging and Monitoring
+  - python-json-logger>=2.0.0
+
+  # Security
+  - cryptography>=41.0.0
+
+  # pip (for packages not available in conda-forge)
+  - pip>=23.0.0
+  - pip:
+    # GCP Services (not available in conda-forge)
+    - google-cloud-firestore==2.13.1
+    - google-cloud-storage==2.10.0
+    - google-cloud-pubsub==2.18.4
+    - google-cloud-logging==3.8.0
+
+    # Finance Data (yfinance not in conda-forge)
+    - yfinance>=0.2.28
+
+    # MCP SDK for AI integration
+    - mcp>=0.9.0
