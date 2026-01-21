@@ -37,6 +37,7 @@ try:
         scan_trades as mcp_scan_trades,
         portfolio_risk as mcp_portfolio_risk,
         morning_brief as mcp_morning_brief,
+        analyze_fibonacci as mcp_analyze_fibonacci,
     )
     MCP_AVAILABLE = True
     logger.info("✅ MCP server functions imported successfully")
@@ -48,6 +49,7 @@ except ImportError as e:
     mcp_scan_trades = None
     mcp_portfolio_risk = None
     mcp_morning_brief = None
+    mcp_analyze_fibonacci = None
 
 # Initialize GCP clients (optional for local testing)
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "ttb-lang1")
@@ -118,6 +120,11 @@ class PortfolioRiskRequest(BaseModel):
 class MorningBriefRequest(BaseModel):
     watchlist: Optional[List[str]] = Field(None, description="Symbols to analyze")
     market_region: str = Field("US", description="Market region")
+
+class FibonacciRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
+    period: str = Field("1d", description="Time period (1d, 1mo, 3mo)")
+    window: int = Field(50, description="Lookback window for swing detection")
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -478,6 +485,33 @@ async def morning_brief_endpoint(request: MorningBriefRequest):
         return result
     except Exception as e:
         logger.error(f"Morning brief error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/fibonacci")
+async def fibonacci_analysis(request: FibonacciRequest):
+    """Comprehensive Fibonacci analysis with levels, signals, and clusters.
+
+    Returns 40+ Fibonacci levels, 200+ signals across categories,
+    confluence zones, and multi-timeframe validation.
+    """
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        logger.info(f"Fibonacci analysis requested for {request.symbol} (period: {request.period})")
+        result = await mcp_analyze_fibonacci(
+            symbol=request.symbol,
+            period=request.period,
+            window=request.window
+        )
+        logger.info(f"Fibonacci analysis completed for {request.symbol}: {len(result.get('levels', []))} levels, {len(result.get('signals', []))} signals")
+        return result
+    except Exception as e:
+        logger.error(f"Fibonacci analysis error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
