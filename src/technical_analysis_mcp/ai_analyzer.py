@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 class MCPToolAIAnalyzer:
     """Use Gemini to analyze and explain MCP tool outputs with natural language insights."""
 
+    MODEL_NAME = "gemini-1.5-flash"
+
     def __init__(self, api_key: str | None = None):
         """Initialize Gemini AI analyzer.
 
@@ -43,8 +45,30 @@ class MCPToolAIAnalyzer:
             raise ValueError("GEMINI_API_KEY not set")
 
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
-        logger.info("AI Analyzer initialized with Gemini 1.5 Flash")
+        self.model = genai.GenerativeModel(self.MODEL_NAME)
+        logger.info("AI Analyzer initialized with %s", self.MODEL_NAME)
+
+    def _perform_analysis(
+        self,
+        result: dict[str, Any],
+        prompt_builder: callable,
+    ) -> dict[str, Any]:
+        """Generic analysis helper to eliminate code duplication.
+
+        Args:
+            result: Original tool output dictionary
+            prompt_builder: Function that takes result and returns prompt string
+
+        Returns:
+            Enhanced result with AI analysis
+        """
+        prompt = prompt_builder(result)
+        response = self.model.generate_content(prompt)
+        ai_analysis = self._parse_ai_response(response.text)
+
+        enhanced = result.copy()
+        enhanced["ai_analysis"] = ai_analysis
+        return enhanced
 
     # ============================================================================
     # ANALYZE_SECURITY TOOL
@@ -60,13 +84,7 @@ class MCPToolAIAnalyzer:
         Returns:
             Enhanced result with AI analysis
         """
-        prompt = self._build_analyze_security_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_analyze_security_prompt)
 
     def _build_analyze_security_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for analyze_security AI analysis."""
@@ -187,13 +205,7 @@ Return ONLY valid JSON (no markdown, no code blocks). Use this exact structure:
         Returns:
             Enhanced result with AI analysis
         """
-        prompt = self._build_comparison_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_comparison_prompt)
 
     def _build_comparison_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for compare_securities AI analysis."""
@@ -268,13 +280,7 @@ Return ONLY valid JSON:
 
     def analyze_screening_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from screen_securities MCP tool."""
-        prompt = self._build_screening_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_screening_prompt)
 
     def _build_screening_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for screen_securities AI analysis."""
@@ -348,13 +354,7 @@ Return ONLY valid JSON:
 
     def analyze_trade_plan_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from get_trade_plan MCP tool."""
-        prompt = self._build_trade_plan_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_trade_plan_prompt)
 
     def _build_trade_plan_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for get_trade_plan AI analysis."""
@@ -449,13 +449,7 @@ Return ONLY valid JSON:
 
     def analyze_scan_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from scan_trades MCP tool."""
-        prompt = self._build_scan_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_scan_prompt)
 
     def _build_scan_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for scan_trades AI analysis."""
@@ -550,13 +544,7 @@ Return ONLY valid JSON:
 
     def analyze_portfolio_risk_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from portfolio_risk MCP tool."""
-        prompt = self._build_portfolio_risk_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_portfolio_risk_prompt)
 
     def _build_portfolio_risk_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for portfolio_risk AI analysis."""
@@ -679,13 +667,7 @@ Return ONLY valid JSON:
 
     def analyze_morning_brief_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from morning_brief MCP tool."""
-        prompt = self._build_morning_brief_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_morning_brief_prompt)
 
     def _build_morning_brief_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for morning_brief AI analysis."""
@@ -779,13 +761,7 @@ Return ONLY valid JSON:
 
     def analyze_fibonacci_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from analyze_fibonacci MCP tool."""
-        prompt = self._build_fibonacci_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_fibonacci_prompt)
 
     def _build_fibonacci_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for analyze_fibonacci AI analysis."""
@@ -896,13 +872,7 @@ Return ONLY valid JSON:
 
     def analyze_options_risk_output(self, result: dict[str, Any]) -> dict[str, Any]:
         """Analyze output from options_risk_analysis MCP tool."""
-        prompt = self._build_options_risk_prompt(result)
-        response = self.model.generate_content(prompt)
-        ai_analysis = self._parse_ai_response(response.text)
-
-        enhanced = result.copy()
-        enhanced["ai_analysis"] = ai_analysis
-        return enhanced
+        return self._perform_analysis(result, self._build_options_risk_prompt)
 
     def _build_options_risk_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for options_risk_analysis AI analysis."""
