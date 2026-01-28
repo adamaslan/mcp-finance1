@@ -29,12 +29,14 @@ class MorningBriefGenerator:
         self,
         watchlist: list[str] | None = None,
         market_region: str = "US",
+        period: str = "1mo",
     ) -> dict[str, Any]:
         """Generate morning market briefing.
 
         Args:
             watchlist: Optional list of symbols (default: top 10 S&P 500).
             market_region: Market region (US, EU, ASIA).
+            period: Time period for analysis.
 
         Returns:
             Morning brief with market status, signals, events, and themes.
@@ -45,14 +47,14 @@ class MorningBriefGenerator:
         else:
             watchlist = watchlist[:10]  # Limit to 10 symbols
 
-        logger.info("Generating morning brief for %d watchlist symbols in %s", len(watchlist), market_region)
+        logger.info("Generating morning brief for %d watchlist symbols in %s (period: %s)", len(watchlist), market_region, period)
 
         # Gather market info in parallel
         market_status = self._market_checker.get_market_status(market_region)
         economic_events = self._calendar.get_todays_events()
 
         # Analyze watchlist symbols
-        watchlist_signals = await self._analyze_watchlist(watchlist)
+        watchlist_signals = await self._analyze_watchlist(watchlist, period=period)
 
         # Get sector movers (mock)
         sector_leaders = self._get_sector_leaders()
@@ -73,11 +75,12 @@ class MorningBriefGenerator:
             "key_themes": market_themes,
         }
 
-    async def _analyze_watchlist(self, symbols: list[str]) -> list[dict[str, Any]]:
+    async def _analyze_watchlist(self, symbols: list[str], period: str = "1mo") -> list[dict[str, Any]]:
         """Analyze watchlist symbols for signals.
 
         Args:
             symbols: List of ticker symbols.
+            period: Time period for analysis.
 
         Returns:
             List of watchlist signal analyses.
@@ -88,7 +91,7 @@ class MorningBriefGenerator:
         async def analyze_symbol(symbol: str) -> dict[str, Any] | None:
             async with semaphore:
                 try:
-                    return await self._analyze_single(symbol)
+                    return await self._analyze_single(symbol, period=period)
                 except Exception as e:
                     logger.warning("Error analyzing %s: %s", symbol, e)
                     return None
@@ -104,18 +107,19 @@ class MorningBriefGenerator:
 
         return results
 
-    async def _analyze_single(self, symbol: str) -> dict[str, Any]:
+    async def _analyze_single(self, symbol: str, period: str = "1mo") -> dict[str, Any]:
         """Analyze single symbol for watchlist.
 
         Args:
             symbol: Ticker symbol.
+            period: Time period for analysis.
 
         Returns:
             Watchlist signal analysis.
         """
         symbol = symbol.upper().strip()
 
-        df = self._fetcher.fetch(symbol, "1mo")
+        df = self._fetcher.fetch(symbol, period)
         df = calculate_all_indicators(df)
 
         current = df.iloc[-1]

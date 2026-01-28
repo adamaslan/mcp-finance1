@@ -27,11 +27,13 @@ class PortfolioRiskAssessor:
     async def assess_positions(
         self,
         positions: list[dict[str, Any]],
+        period: str = "1mo",
     ) -> dict[str, Any]:
         """Assess aggregate risk across positions.
 
         Args:
             positions: List of position dicts with symbol, shares, entry_price.
+            period: Time period for analysis.
 
         Returns:
             Portfolio risk assessment with positions, aggregate metrics.
@@ -49,7 +51,7 @@ class PortfolioRiskAssessor:
                 "timestamp": datetime.now().isoformat(),
             }
 
-        logger.info("Assessing %d positions", len(positions))
+        logger.info("Assessing %d positions (period: %s)", len(positions), period)
 
         # Assess each position in parallel
         semaphore = asyncio.Semaphore(5)
@@ -58,7 +60,7 @@ class PortfolioRiskAssessor:
         async def assess_position(pos: dict[str, Any]) -> dict[str, Any] | None:
             async with semaphore:
                 try:
-                    return await self._assess_single_position(pos)
+                    return await self._assess_single_position(pos, period=period)
                 except Exception as e:
                     logger.warning("Error assessing %s: %s", pos.get("symbol"), e)
                     return None
@@ -113,11 +115,12 @@ class PortfolioRiskAssessor:
             "timestamp": datetime.now().isoformat(),
         }
 
-    async def _assess_single_position(self, position: dict[str, Any]) -> dict[str, Any]:
+    async def _assess_single_position(self, position: dict[str, Any], period: str = "1mo") -> dict[str, Any]:
         """Assess risk for a single position.
 
         Args:
             position: Position dict with symbol, shares, entry_price.
+            period: Time period for analysis.
 
         Returns:
             Position risk assessment.
@@ -127,7 +130,7 @@ class PortfolioRiskAssessor:
         entry_price = position.get("entry_price", 0)
 
         # Fetch current data
-        df = self._fetcher.fetch(symbol, "1mo")
+        df = self._fetcher.fetch(symbol, period)
         df = calculate_all_indicators(df)
 
         current = df.iloc[-1]

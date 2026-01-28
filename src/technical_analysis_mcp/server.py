@@ -86,7 +86,9 @@ def calculate_adaptive_tolerance(level_prices: list[float]) -> float:
         return 0.015  # Default tolerance when no spread
 
     # Calculate percentage differences relative to each price
-    pct_diffs = price_diffs[:-1] / prices[:-1]  # Use price of lower level
+    # np.diff(prices) returns N-1 elements if prices has N elements
+    # price_diffs[i] = prices[i+1] - prices[i], so divide by prices[i]
+    pct_diffs = price_diffs / prices[:-1]  # Use price of lower level
 
     # Use 25th percentile as distribution measure (robust to outliers)
     try:
@@ -118,7 +120,7 @@ async def list_tools() -> list[Tool]:
                     "period": {
                         "type": "string",
                         "default": "1mo",
-                        "description": "Time period (1mo, 3mo, 6mo, 1y)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                     "use_ai": {
                         "type": "boolean",
@@ -145,6 +147,11 @@ async def list_tools() -> list[Tool]:
                         "default": "signals",
                         "description": "Comparison metric",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["symbols"],
             },
@@ -169,6 +176,11 @@ async def list_tools() -> list[Tool]:
                         "default": 20,
                         "description": "Maximum results to return",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["criteria"],
             },
@@ -186,7 +198,7 @@ async def list_tools() -> list[Tool]:
                     "period": {
                         "type": "string",
                         "default": "1mo",
-                        "description": "Time period (1mo, 3mo, 6mo, 1y)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": ["symbol"],
@@ -207,6 +219,11 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "default": 10,
                         "description": "Maximum results (1-50)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": [],
@@ -240,6 +257,11 @@ async def list_tools() -> list[Tool]:
                         },
                         "description": "List of open positions",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["positions"],
             },
@@ -259,6 +281,11 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "default": "US",
                         "description": "Market region (US, EU, ASIA)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": [],
@@ -281,7 +308,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "description": "Time period (1d, 1mo, 3mo)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                         "default": "1mo",
                     },
                     "window": {
@@ -467,12 +494,14 @@ async def analyze_security(
 async def compare_securities(
     symbols: list[str],
     metric: str = "signals",
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Compare multiple securities.
 
     Args:
         symbols: List of ticker symbols.
         metric: Comparison metric.
+        period: Time period for analysis.
 
     Returns:
         Comparison result with ranked securities.
@@ -480,11 +509,11 @@ async def compare_securities(
     symbols = symbols[:MAX_SYMBOLS_COMPARE]
     results: list[dict[str, Any]] = []
 
-    logger.info("Comparing %d securities", len(symbols))
+    logger.info("Comparing %d securities (period: %s)", len(symbols), period)
 
     for symbol in symbols:
         try:
-            analysis = await analyze_security(symbol, period="1mo")
+            analysis = await analyze_security(symbol, period=period)
             results.append({
                 "symbol": symbol,
                 "score": analysis["summary"]["avg_score"],
@@ -511,6 +540,7 @@ async def screen_securities(
     universe: str = "sp500",
     criteria: dict[str, Any] | None = None,
     limit: int = 20,
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Screen securities against criteria.
 
@@ -518,6 +548,7 @@ async def screen_securities(
         universe: Universe name (sp500, nasdaq100, etc.).
         criteria: Screening criteria.
         limit: Maximum results.
+        period: Time period for analysis.
 
     Returns:
         Screening result with matches.
@@ -534,13 +565,13 @@ async def screen_securities(
             "criteria": criteria,
         }
 
-    logger.info("Screening %d securities from %s", len(symbols), universe)
+    logger.info("Screening %d securities from %s (period: %s)", len(symbols), universe, period)
 
     matches: list[dict[str, Any]] = []
 
     for symbol in symbols:
         try:
-            analysis = await analyze_security(symbol, period="1mo")
+            analysis = await analyze_security(symbol, period=period)
 
             if _meets_criteria(analysis, criteria):
                 matches.append({
@@ -661,6 +692,7 @@ async def get_trade_plan(
 async def scan_trades(
     universe: str = "sp500",
     max_results: int = 10,
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Scan universe for qualified trade setups.
 
@@ -671,14 +703,15 @@ async def scan_trades(
     Args:
         universe: Universe to scan (sp500, nasdaq100, etf_large_cap, crypto).
         max_results: Maximum results to return (1-50).
+        period: Time period for analysis.
 
     Returns:
         Scan results with qualified setups.
     """
-    logger.info("Scanning %s universe for trades (max_results: %d)", universe, max_results)
+    logger.info("Scanning %s universe for trades (period: %s, max_results: %d)", universe, period, max_results)
 
     scanner = TradeScanner(max_concurrent=10)
-    result = await scanner.scan_universe(universe, max_results, period="1mo")
+    result = await scanner.scan_universe(universe, max_results, period=period)
 
     logger.info(
         "Scan complete for %s: found %d qualified trades from %d scanned",
@@ -692,6 +725,7 @@ async def scan_trades(
 
 async def portfolio_risk(
     positions: list[dict[str, Any]],
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Assess aggregate risk across portfolio positions.
 
@@ -701,14 +735,15 @@ async def portfolio_risk(
 
     Args:
         positions: List of position dicts with symbol, shares, entry_price.
+        period: Time period for analysis.
 
     Returns:
         Portfolio risk assessment with aggregate and position-level metrics.
     """
-    logger.info("Assessing portfolio risk across %d positions", len(positions))
+    logger.info("Assessing portfolio risk across %d positions (period: %s)", len(positions), period)
 
     assessor = PortfolioRiskAssessor()
-    result = await assessor.assess_positions(positions)
+    result = await assessor.assess_positions(positions, period=period)
 
     logger.info(
         "Portfolio assessment complete: total_value=%.2f, max_loss=%.2f, risk_level=%s",
@@ -723,6 +758,7 @@ async def portfolio_risk(
 async def morning_brief(
     watchlist: list[str] | None = None,
     market_region: str = "US",
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Generate daily market briefing with signals and market conditions.
 
@@ -732,14 +768,15 @@ async def morning_brief(
     Args:
         watchlist: Optional list of symbols (default: top tech/finance stocks).
         market_region: Market region (US, EU, ASIA).
+        period: Time period for analysis.
 
     Returns:
         Morning brief with market status, events, signals, and themes.
     """
-    logger.info("Generating morning brief for region: %s", market_region)
+    logger.info("Generating morning brief for region: %s (period: %s)", market_region, period)
 
     generator = MorningBriefGenerator()
-    result = await generator.generate_brief(watchlist, market_region)
+    result = await generator.generate_brief(watchlist, market_region, period=period)
 
     logger.info(
         "Morning brief complete: %d symbols analyzed, %d themes detected",
@@ -1144,6 +1181,85 @@ async def analyze_fibonacci(
     return result
 
 
+def _analyze_option_chain(
+    options_df: Any,
+    current_price: float,
+    min_volume: int,
+    option_type_name: str,
+) -> dict[str, Any] | None:
+    """Analyze a single option chain (calls or puts).
+
+    Args:
+        options_df: DataFrame with options data (calls or puts)
+        current_price: Current stock price
+        min_volume: Minimum volume threshold for liquid options
+        option_type_name: "calls" or "puts" for logging
+
+    Returns:
+        Analysis dictionary or None if options_df is empty
+    """
+    if options_df.empty:
+        return None
+
+    liquid_options = options_df[options_df["volume"] >= min_volume]
+
+    analysis = {
+        "total_contracts": len(options_df),
+        "liquid_contracts": len(liquid_options),
+        "total_volume": int(options_df["volume"].sum()),
+        "total_open_interest": int(options_df["openInterest"].sum()),
+        "avg_implied_volatility": float(options_df["impliedVolatility"].mean() * 100),
+        "max_iv": float(options_df["impliedVolatility"].max() * 100),
+        "min_iv": float(options_df["impliedVolatility"].min() * 100),
+        "atm_strike": None,
+        "atm_iv": None,
+        "atm_delta": None,
+        "top_volume_strikes": [],
+        "top_oi_strikes": [],
+    }
+
+    # Find ATM option
+    if not liquid_options.empty:
+        atm_option = liquid_options.iloc[
+            (liquid_options["strike"] - current_price).abs().argsort()[:1]
+        ]
+        if not atm_option.empty:
+            analysis["atm_strike"] = float(atm_option["strike"].iloc[0])
+            analysis["atm_iv"] = float(atm_option["impliedVolatility"].iloc[0] * 100)
+            # Greeks might not always be available
+            if "delta" in atm_option.columns:
+                analysis["atm_delta"] = float(atm_option["delta"].iloc[0])
+
+    # Top strikes by volume
+    if not liquid_options.empty:
+        top_vol = liquid_options.nlargest(5, "volume")[
+            ["strike", "volume", "impliedVolatility"]
+        ]
+        analysis["top_volume_strikes"] = [
+            {
+                "strike": float(row["strike"]),
+                "volume": int(row["volume"]),
+                "iv": float(row["impliedVolatility"] * 100),
+            }
+            for _, row in top_vol.iterrows()
+        ]
+
+        # Top strikes by open interest
+        top_oi = liquid_options.nlargest(5, "openInterest")[
+            ["strike", "openInterest", "impliedVolatility"]
+        ]
+        analysis["top_oi_strikes"] = [
+            {
+                "strike": float(row["strike"]),
+                "open_interest": int(row["openInterest"]),
+                "iv": float(row["impliedVolatility"] * 100),
+            }
+            for _, row in top_oi.iterrows()
+        ]
+
+    return analysis
+
+
 async def options_risk_analysis(
     symbol: str,
     expiration_date: str | None = None,
@@ -1228,110 +1344,15 @@ async def options_risk_analysis(
         exp_date = datetime.strptime(selected_expiration, "%Y-%m-%d")
         dte = (exp_date - datetime.now()).days
 
-        # Analyze calls
+        # Analyze calls using helper function
         calls_analysis = None
-        if option_type in ("calls", "both") and not calls.empty:
-            calls_liquid = calls[calls["volume"] >= min_volume]
+        if option_type in ("calls", "both"):
+            calls_analysis = _analyze_option_chain(calls, current_price, min_volume, "calls")
 
-            calls_analysis = {
-                "total_contracts": len(calls),
-                "liquid_contracts": len(calls_liquid),
-                "total_volume": int(calls["volume"].sum()),
-                "total_open_interest": int(calls["openInterest"].sum()),
-                "avg_implied_volatility": float(calls["impliedVolatility"].mean() * 100),
-                "max_iv": float(calls["impliedVolatility"].max() * 100),
-                "min_iv": float(calls["impliedVolatility"].min() * 100),
-                "atm_strike": None,
-                "atm_iv": None,
-                "atm_delta": None,
-                "top_volume_strikes": [],
-                "top_oi_strikes": [],
-            }
-
-            # Find ATM call
-            if not calls_liquid.empty:
-                atm_call = calls_liquid.iloc[(calls_liquid["strike"] - current_price).abs().argsort()[:1]]
-                if not atm_call.empty:
-                    calls_analysis["atm_strike"] = float(atm_call["strike"].iloc[0])
-                    calls_analysis["atm_iv"] = float(atm_call["impliedVolatility"].iloc[0] * 100)
-                    # Greeks might not always be available
-                    if "delta" in atm_call.columns:
-                        calls_analysis["atm_delta"] = float(atm_call["delta"].iloc[0])
-
-            # Top strikes by volume
-            if not calls_liquid.empty:
-                top_vol = calls_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
-                calls_analysis["top_volume_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "volume": int(row["volume"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_vol.iterrows()
-                ]
-
-                # Top strikes by open interest
-                top_oi = calls_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
-                calls_analysis["top_oi_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "open_interest": int(row["openInterest"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_oi.iterrows()
-                ]
-
-        # Analyze puts
+        # Analyze puts using helper function
         puts_analysis = None
-        if option_type in ("puts", "both") and not puts.empty:
-            puts_liquid = puts[puts["volume"] >= min_volume]
-
-            puts_analysis = {
-                "total_contracts": len(puts),
-                "liquid_contracts": len(puts_liquid),
-                "total_volume": int(puts["volume"].sum()),
-                "total_open_interest": int(puts["openInterest"].sum()),
-                "avg_implied_volatility": float(puts["impliedVolatility"].mean() * 100),
-                "max_iv": float(puts["impliedVolatility"].max() * 100),
-                "min_iv": float(puts["impliedVolatility"].min() * 100),
-                "atm_strike": None,
-                "atm_iv": None,
-                "atm_delta": None,
-                "top_volume_strikes": [],
-                "top_oi_strikes": [],
-            }
-
-            # Find ATM put
-            if not puts_liquid.empty:
-                atm_put = puts_liquid.iloc[(puts_liquid["strike"] - current_price).abs().argsort()[:1]]
-                if not atm_put.empty:
-                    puts_analysis["atm_strike"] = float(atm_put["strike"].iloc[0])
-                    puts_analysis["atm_iv"] = float(atm_put["impliedVolatility"].iloc[0] * 100)
-                    if "delta" in atm_put.columns:
-                        puts_analysis["atm_delta"] = float(atm_put["delta"].iloc[0])
-
-            # Top strikes by volume
-            if not puts_liquid.empty:
-                top_vol = puts_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
-                puts_analysis["top_volume_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "volume": int(row["volume"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_vol.iterrows()
-                ]
-
-                # Top strikes by open interest
-                top_oi = puts_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
-                puts_analysis["top_oi_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "open_interest": int(row["openInterest"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_oi.iterrows()
-                ]
+        if option_type in ("puts", "both"):
+            puts_analysis = _analyze_option_chain(puts, current_price, min_volume, "puts")
 
         # Calculate Put/Call Ratio
         pcr_volume = None

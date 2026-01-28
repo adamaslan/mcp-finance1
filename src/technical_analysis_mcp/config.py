@@ -15,7 +15,7 @@ CACHE_MAX_SIZE: Final[int] = 100  # Maximum symbols to cache
 # Data Fetching
 DEFAULT_PERIOD: Final[str] = "1mo"
 VALID_PERIODS: Final[tuple[str, ...]] = (
-    "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
+    "15m", "1h", "4h", "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
 )
 MAX_RETRY_ATTEMPTS: Final[int] = 3
 RETRY_BACKOFF_SECONDS: Final[float] = 1.0
