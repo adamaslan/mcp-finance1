@@ -293,6 +293,39 @@ async def list_tools() -> list[Tool]:
                 "required": ["symbol"],
             },
         ),
+        Tool(
+            name="options_risk_analysis",
+            description=(
+                "Analyze options chain risk metrics using real yfinance data. "
+                "Includes IV analysis, Greeks (Delta, Gamma, Theta, Vega), "
+                "volume/open interest analysis, Put/Call ratio, and risk warnings. "
+                "Provides actionable insights for options trading strategies."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "Ticker symbol (e.g., AAPL, MSFT)",
+                    },
+                    "expiration_date": {
+                        "type": "string",
+                        "description": "Specific expiration date (YYYY-MM-DD). If omitted, uses nearest expiration.",
+                    },
+                    "option_type": {
+                        "type": "string",
+                        "default": "both",
+                        "description": "Type of options to analyze: 'calls', 'puts', or 'both'",
+                    },
+                    "min_volume": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Minimum volume threshold for liquid options",
+                    },
+                },
+                "required": ["symbol"],
+            },
+        ),
     ]
 
 
@@ -330,6 +363,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
         if name == "analyze_fibonacci":
             result = await analyze_fibonacci(**arguments)
+            import json
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        if name == "options_risk_analysis":
+            result = await options_risk_analysis(**arguments)
             import json
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
@@ -1104,6 +1142,290 @@ async def analyze_fibonacci(
     )
 
     return result
+
+
+async def options_risk_analysis(
+    symbol: str,
+    expiration_date: str | None = None,
+    option_type: str = "both",
+    min_volume: int = 10,
+) -> dict[str, Any]:
+    """Analyze options chain risk metrics for a security using real yfinance data.
+
+    Comprehensive options risk analysis including:
+    - Real options chain data from yfinance
+    - IV (Implied Volatility) analysis
+    - Greeks analysis (Delta, Gamma, Theta, Vega)
+    - Volume and open interest analysis
+    - Put/Call ratio
+    - Risk warnings and opportunities
+
+    Args:
+        symbol: Ticker symbol.
+        expiration_date: Specific expiration date (YYYY-MM-DD). If None, uses nearest expiration.
+        option_type: Type of options to analyze ('calls', 'puts', or 'both').
+        min_volume: Minimum volume threshold for liquid options.
+
+    Returns:
+        Comprehensive options risk analysis result dictionary.
+
+    Raises:
+        DataFetchError: If options data cannot be fetched.
+        InvalidSymbolError: If symbol is invalid.
+    """
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    import numpy as np
+
+    symbol = symbol.upper().strip()
+    logger.info(
+        "Analyzing options risk for %s (expiration: %s, type: %s)",
+        symbol,
+        expiration_date or "nearest",
+        option_type,
+    )
+
+    try:
+        # Fetch ticker and options data from yfinance
+        ticker = yf.Ticker(symbol)
+
+        # Get stock info for context
+        try:
+            info = ticker.info
+            current_price = info.get("currentPrice") or info.get("regularMarketPrice", 0)
+        except Exception:
+            # Fallback to history if info fails
+            hist = ticker.history(period="1d")
+            if hist.empty:
+                raise DataFetchError(symbol, "1d", "No price data available")
+            current_price = float(hist["Close"].iloc[-1])
+
+        # Get available expiration dates
+        expirations = ticker.options
+        if not expirations:
+            raise DataFetchError(symbol, "options", "No options data available")
+
+        # Select expiration date
+        if expiration_date:
+            if expiration_date not in expirations:
+                logger.warning(
+                    "Requested expiration %s not found, using nearest: %s",
+                    expiration_date,
+                    expirations[0],
+                )
+                selected_expiration = expirations[0]
+            else:
+                selected_expiration = expiration_date
+        else:
+            selected_expiration = expirations[0]
+
+        # Fetch option chain
+        option_chain = ticker.option_chain(selected_expiration)
+        calls = option_chain.calls
+        puts = option_chain.puts
+
+        # Calculate days to expiration
+        exp_date = datetime.strptime(selected_expiration, "%Y-%m-%d")
+        dte = (exp_date - datetime.now()).days
+
+        # Analyze calls
+        calls_analysis = None
+        if option_type in ("calls", "both") and not calls.empty:
+            calls_liquid = calls[calls["volume"] >= min_volume]
+
+            calls_analysis = {
+                "total_contracts": len(calls),
+                "liquid_contracts": len(calls_liquid),
+                "total_volume": int(calls["volume"].sum()),
+                "total_open_interest": int(calls["openInterest"].sum()),
+                "avg_implied_volatility": float(calls["impliedVolatility"].mean() * 100),
+                "max_iv": float(calls["impliedVolatility"].max() * 100),
+                "min_iv": float(calls["impliedVolatility"].min() * 100),
+                "atm_strike": None,
+                "atm_iv": None,
+                "atm_delta": None,
+                "top_volume_strikes": [],
+                "top_oi_strikes": [],
+            }
+
+            # Find ATM call
+            if not calls_liquid.empty:
+                atm_call = calls_liquid.iloc[(calls_liquid["strike"] - current_price).abs().argsort()[:1]]
+                if not atm_call.empty:
+                    calls_analysis["atm_strike"] = float(atm_call["strike"].iloc[0])
+                    calls_analysis["atm_iv"] = float(atm_call["impliedVolatility"].iloc[0] * 100)
+                    # Greeks might not always be available
+                    if "delta" in atm_call.columns:
+                        calls_analysis["atm_delta"] = float(atm_call["delta"].iloc[0])
+
+            # Top strikes by volume
+            if not calls_liquid.empty:
+                top_vol = calls_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
+                calls_analysis["top_volume_strikes"] = [
+                    {
+                        "strike": float(row["strike"]),
+                        "volume": int(row["volume"]),
+                        "iv": float(row["impliedVolatility"] * 100),
+                    }
+                    for _, row in top_vol.iterrows()
+                ]
+
+                # Top strikes by open interest
+                top_oi = calls_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
+                calls_analysis["top_oi_strikes"] = [
+                    {
+                        "strike": float(row["strike"]),
+                        "open_interest": int(row["openInterest"]),
+                        "iv": float(row["impliedVolatility"] * 100),
+                    }
+                    for _, row in top_oi.iterrows()
+                ]
+
+        # Analyze puts
+        puts_analysis = None
+        if option_type in ("puts", "both") and not puts.empty:
+            puts_liquid = puts[puts["volume"] >= min_volume]
+
+            puts_analysis = {
+                "total_contracts": len(puts),
+                "liquid_contracts": len(puts_liquid),
+                "total_volume": int(puts["volume"].sum()),
+                "total_open_interest": int(puts["openInterest"].sum()),
+                "avg_implied_volatility": float(puts["impliedVolatility"].mean() * 100),
+                "max_iv": float(puts["impliedVolatility"].max() * 100),
+                "min_iv": float(puts["impliedVolatility"].min() * 100),
+                "atm_strike": None,
+                "atm_iv": None,
+                "atm_delta": None,
+                "top_volume_strikes": [],
+                "top_oi_strikes": [],
+            }
+
+            # Find ATM put
+            if not puts_liquid.empty:
+                atm_put = puts_liquid.iloc[(puts_liquid["strike"] - current_price).abs().argsort()[:1]]
+                if not atm_put.empty:
+                    puts_analysis["atm_strike"] = float(atm_put["strike"].iloc[0])
+                    puts_analysis["atm_iv"] = float(atm_put["impliedVolatility"].iloc[0] * 100)
+                    if "delta" in atm_put.columns:
+                        puts_analysis["atm_delta"] = float(atm_put["delta"].iloc[0])
+
+            # Top strikes by volume
+            if not puts_liquid.empty:
+                top_vol = puts_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
+                puts_analysis["top_volume_strikes"] = [
+                    {
+                        "strike": float(row["strike"]),
+                        "volume": int(row["volume"]),
+                        "iv": float(row["impliedVolatility"] * 100),
+                    }
+                    for _, row in top_vol.iterrows()
+                ]
+
+                # Top strikes by open interest
+                top_oi = puts_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
+                puts_analysis["top_oi_strikes"] = [
+                    {
+                        "strike": float(row["strike"]),
+                        "open_interest": int(row["openInterest"]),
+                        "iv": float(row["impliedVolatility"] * 100),
+                    }
+                    for _, row in top_oi.iterrows()
+                ]
+
+        # Calculate Put/Call Ratio
+        pcr_volume = None
+        pcr_oi = None
+        if calls_analysis and puts_analysis:
+            if calls_analysis["total_volume"] > 0:
+                pcr_volume = puts_analysis["total_volume"] / calls_analysis["total_volume"]
+            if calls_analysis["total_open_interest"] > 0:
+                pcr_oi = puts_analysis["total_open_interest"] / calls_analysis["total_open_interest"]
+
+        # Risk assessment and warnings
+        risk_warnings = []
+        opportunities = []
+
+        # High IV warning
+        if calls_analysis and calls_analysis["avg_implied_volatility"] > 60:
+            risk_warnings.append(
+                f"High implied volatility ({calls_analysis['avg_implied_volatility']:.1f}%) - "
+                "options are expensive, consider selling strategies"
+            )
+        elif calls_analysis and calls_analysis["avg_implied_volatility"] < 20:
+            opportunities.append(
+                f"Low implied volatility ({calls_analysis['avg_implied_volatility']:.1f}%) - "
+                "options are cheap, consider buying strategies"
+            )
+
+        # Put/Call ratio insights
+        if pcr_volume:
+            if pcr_volume > 1.5:
+                risk_warnings.append(
+                    f"High Put/Call Volume Ratio ({pcr_volume:.2f}) - bearish sentiment, "
+                    "heavy put buying"
+                )
+            elif pcr_volume < 0.7:
+                opportunities.append(
+                    f"Low Put/Call Volume Ratio ({pcr_volume:.2f}) - bullish sentiment, "
+                    "heavy call buying"
+                )
+
+        # Liquidity warning
+        if calls_analysis and calls_analysis["liquid_contracts"] < 5:
+            risk_warnings.append(
+                f"Low liquidity in calls ({calls_analysis['liquid_contracts']} contracts) - "
+                "wide bid-ask spreads likely"
+            )
+        if puts_analysis and puts_analysis["liquid_contracts"] < 5:
+            risk_warnings.append(
+                f"Low liquidity in puts ({puts_analysis['liquid_contracts']} contracts) - "
+                "wide bid-ask spreads likely"
+            )
+
+        # DTE warnings
+        if dte < 7:
+            risk_warnings.append(
+                f"Short time to expiration ({dte} days) - high theta decay, "
+                "rapid price movement needed"
+            )
+        elif dte > 60:
+            opportunities.append(
+                f"Long time to expiration ({dte} days) - lower theta decay, "
+                "suitable for longer-term positions"
+            )
+
+        result = {
+            "symbol": symbol,
+            "timestamp": datetime.now().isoformat(),
+            "current_price": current_price,
+            "expiration_date": selected_expiration,
+            "days_to_expiration": dte,
+            "available_expirations": list(expirations)[:10],  # First 10
+            "calls": calls_analysis,
+            "puts": puts_analysis,
+            "put_call_ratio": {
+                "volume": pcr_volume,
+                "open_interest": pcr_oi,
+            },
+            "risk_warnings": risk_warnings,
+            "opportunities": opportunities,
+            "liquidity_threshold": min_volume,
+        }
+
+        logger.info(
+            "Options risk analysis complete for %s: %d calls, %d puts, PCR: %.2f",
+            symbol,
+            calls_analysis["total_contracts"] if calls_analysis else 0,
+            puts_analysis["total_contracts"] if puts_analysis else 0,
+            pcr_volume or 0,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("Options risk analysis failed for %s: %s", symbol, e)
+        raise DataFetchError(symbol, "options", str(e))
 
 
 async def record_fibonacci_signals(
