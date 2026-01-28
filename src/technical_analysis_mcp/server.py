@@ -1144,6 +1144,85 @@ async def analyze_fibonacci(
     return result
 
 
+def _analyze_option_chain(
+    options_df: Any,
+    current_price: float,
+    min_volume: int,
+    option_type_name: str,
+) -> dict[str, Any] | None:
+    """Analyze a single option chain (calls or puts).
+
+    Args:
+        options_df: DataFrame with options data (calls or puts)
+        current_price: Current stock price
+        min_volume: Minimum volume threshold for liquid options
+        option_type_name: "calls" or "puts" for logging
+
+    Returns:
+        Analysis dictionary or None if options_df is empty
+    """
+    if options_df.empty:
+        return None
+
+    liquid_options = options_df[options_df["volume"] >= min_volume]
+
+    analysis = {
+        "total_contracts": len(options_df),
+        "liquid_contracts": len(liquid_options),
+        "total_volume": int(options_df["volume"].sum()),
+        "total_open_interest": int(options_df["openInterest"].sum()),
+        "avg_implied_volatility": float(options_df["impliedVolatility"].mean() * 100),
+        "max_iv": float(options_df["impliedVolatility"].max() * 100),
+        "min_iv": float(options_df["impliedVolatility"].min() * 100),
+        "atm_strike": None,
+        "atm_iv": None,
+        "atm_delta": None,
+        "top_volume_strikes": [],
+        "top_oi_strikes": [],
+    }
+
+    # Find ATM option
+    if not liquid_options.empty:
+        atm_option = liquid_options.iloc[
+            (liquid_options["strike"] - current_price).abs().argsort()[:1]
+        ]
+        if not atm_option.empty:
+            analysis["atm_strike"] = float(atm_option["strike"].iloc[0])
+            analysis["atm_iv"] = float(atm_option["impliedVolatility"].iloc[0] * 100)
+            # Greeks might not always be available
+            if "delta" in atm_option.columns:
+                analysis["atm_delta"] = float(atm_option["delta"].iloc[0])
+
+    # Top strikes by volume
+    if not liquid_options.empty:
+        top_vol = liquid_options.nlargest(5, "volume")[
+            ["strike", "volume", "impliedVolatility"]
+        ]
+        analysis["top_volume_strikes"] = [
+            {
+                "strike": float(row["strike"]),
+                "volume": int(row["volume"]),
+                "iv": float(row["impliedVolatility"] * 100),
+            }
+            for _, row in top_vol.iterrows()
+        ]
+
+        # Top strikes by open interest
+        top_oi = liquid_options.nlargest(5, "openInterest")[
+            ["strike", "openInterest", "impliedVolatility"]
+        ]
+        analysis["top_oi_strikes"] = [
+            {
+                "strike": float(row["strike"]),
+                "open_interest": int(row["openInterest"]),
+                "iv": float(row["impliedVolatility"] * 100),
+            }
+            for _, row in top_oi.iterrows()
+        ]
+
+    return analysis
+
+
 async def options_risk_analysis(
     symbol: str,
     expiration_date: str | None = None,
@@ -1228,110 +1307,15 @@ async def options_risk_analysis(
         exp_date = datetime.strptime(selected_expiration, "%Y-%m-%d")
         dte = (exp_date - datetime.now()).days
 
-        # Analyze calls
+        # Analyze calls using helper function
         calls_analysis = None
-        if option_type in ("calls", "both") and not calls.empty:
-            calls_liquid = calls[calls["volume"] >= min_volume]
+        if option_type in ("calls", "both"):
+            calls_analysis = _analyze_option_chain(calls, current_price, min_volume, "calls")
 
-            calls_analysis = {
-                "total_contracts": len(calls),
-                "liquid_contracts": len(calls_liquid),
-                "total_volume": int(calls["volume"].sum()),
-                "total_open_interest": int(calls["openInterest"].sum()),
-                "avg_implied_volatility": float(calls["impliedVolatility"].mean() * 100),
-                "max_iv": float(calls["impliedVolatility"].max() * 100),
-                "min_iv": float(calls["impliedVolatility"].min() * 100),
-                "atm_strike": None,
-                "atm_iv": None,
-                "atm_delta": None,
-                "top_volume_strikes": [],
-                "top_oi_strikes": [],
-            }
-
-            # Find ATM call
-            if not calls_liquid.empty:
-                atm_call = calls_liquid.iloc[(calls_liquid["strike"] - current_price).abs().argsort()[:1]]
-                if not atm_call.empty:
-                    calls_analysis["atm_strike"] = float(atm_call["strike"].iloc[0])
-                    calls_analysis["atm_iv"] = float(atm_call["impliedVolatility"].iloc[0] * 100)
-                    # Greeks might not always be available
-                    if "delta" in atm_call.columns:
-                        calls_analysis["atm_delta"] = float(atm_call["delta"].iloc[0])
-
-            # Top strikes by volume
-            if not calls_liquid.empty:
-                top_vol = calls_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
-                calls_analysis["top_volume_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "volume": int(row["volume"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_vol.iterrows()
-                ]
-
-                # Top strikes by open interest
-                top_oi = calls_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
-                calls_analysis["top_oi_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "open_interest": int(row["openInterest"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_oi.iterrows()
-                ]
-
-        # Analyze puts
+        # Analyze puts using helper function
         puts_analysis = None
-        if option_type in ("puts", "both") and not puts.empty:
-            puts_liquid = puts[puts["volume"] >= min_volume]
-
-            puts_analysis = {
-                "total_contracts": len(puts),
-                "liquid_contracts": len(puts_liquid),
-                "total_volume": int(puts["volume"].sum()),
-                "total_open_interest": int(puts["openInterest"].sum()),
-                "avg_implied_volatility": float(puts["impliedVolatility"].mean() * 100),
-                "max_iv": float(puts["impliedVolatility"].max() * 100),
-                "min_iv": float(puts["impliedVolatility"].min() * 100),
-                "atm_strike": None,
-                "atm_iv": None,
-                "atm_delta": None,
-                "top_volume_strikes": [],
-                "top_oi_strikes": [],
-            }
-
-            # Find ATM put
-            if not puts_liquid.empty:
-                atm_put = puts_liquid.iloc[(puts_liquid["strike"] - current_price).abs().argsort()[:1]]
-                if not atm_put.empty:
-                    puts_analysis["atm_strike"] = float(atm_put["strike"].iloc[0])
-                    puts_analysis["atm_iv"] = float(atm_put["impliedVolatility"].iloc[0] * 100)
-                    if "delta" in atm_put.columns:
-                        puts_analysis["atm_delta"] = float(atm_put["delta"].iloc[0])
-
-            # Top strikes by volume
-            if not puts_liquid.empty:
-                top_vol = puts_liquid.nlargest(5, "volume")[["strike", "volume", "impliedVolatility"]]
-                puts_analysis["top_volume_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "volume": int(row["volume"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_vol.iterrows()
-                ]
-
-                # Top strikes by open interest
-                top_oi = puts_liquid.nlargest(5, "openInterest")[["strike", "openInterest", "impliedVolatility"]]
-                puts_analysis["top_oi_strikes"] = [
-                    {
-                        "strike": float(row["strike"]),
-                        "open_interest": int(row["openInterest"]),
-                        "iv": float(row["impliedVolatility"] * 100),
-                    }
-                    for _, row in top_oi.iterrows()
-                ]
+        if option_type in ("puts", "both"):
+            puts_analysis = _analyze_option_chain(puts, current_price, min_volume, "puts")
 
         # Calculate Put/Call Ratio
         pcr_volume = None
