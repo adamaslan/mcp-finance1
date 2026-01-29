@@ -1,0 +1,65 @@
+# Example backtests configuration
+# Global settings and per-MCP overrides
+global:
+  data_source: yfinance
+  cache_dir: data/cache
+  start_date: 2010-01-01
+  end_date: 2025-01-01
+  frequency: daily
+  transaction_cost_bps: 5
+  slippage_model: pct_of_spread
+  random_seed: 42
+
+mcps:
+  MCP1:
+    universe: file://nu-docs/universes/mcp1.csv
+  MCP2:
+    universe: file://nu-docs/universes/mcp2.csv
+  MCP3:
+    universe: file://nu-docs/universes/mcp3.csv
+  MCP4:
+    universe: file://nu-docs/universes/mcp4.csv
+  MCP5:
+    universe: file://nu-docs/universes/mcp5.csv
+  MCP6:
+    universe: file://nu-docs/universes/mcp6.csv
+  MCP7:
+    universe: file://nu-docs/universes/mcp7.csv
+  MCP8:
+    universe: file://nu-docs/universes/mcp8.csv
+  MCP9:
+    universe: file://nu-docs/universes/mcp9.csv
+
+backtests:
+  - id: buy_hold_baseline
+    type: buy_and_hold
+    apply_to: [MCP1, MCP2, MCP3, MCP4, MCP5, MCP6, MCP7, MCP8, MCP9]
+    params: {}
+
+  - id: momentum_standard
+    type: momentum
+    apply_to: [MCP1, MCP2, MCP3]
+    params:
+      lookback: 90
+      top_n: 20
+      weighting: equal
+      rebalance: monthly
+
+  - id: momentum_longterm
+    type: momentum
+    apply_to: [MCP4, MCP5]
+    params:
+      lookback: 252
+      top_n: 30
+      weighting: risk_parity
+      rebalance: quarterly
+
+  - id: transaction_cost_sweep
+    type: sensitivity
+    apply_to: [MCP1]
+    params:
+      base_test: momentum_standard
+      sweep_param: transaction_cost_bps
+      values: [0, 1, 5, 10, 20]
+
+# Add additional backtest ids mapping to the 20 template types (see nu-docs/nu-backtests-per-mcp.md)
