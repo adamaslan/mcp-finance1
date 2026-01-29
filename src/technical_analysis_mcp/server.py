@@ -86,7 +86,9 @@ def calculate_adaptive_tolerance(level_prices: list[float]) -> float:
         return 0.015  # Default tolerance when no spread
 
     # Calculate percentage differences relative to each price
-    pct_diffs = price_diffs[:-1] / prices[:-1]  # Use price of lower level
+    # np.diff(prices) returns N-1 elements if prices has N elements
+    # price_diffs[i] = prices[i+1] - prices[i], so divide by prices[i]
+    pct_diffs = price_diffs / prices[:-1]  # Use price of lower level
 
     # Use 25th percentile as distribution measure (robust to outliers)
     try:
@@ -118,7 +120,7 @@ async def list_tools() -> list[Tool]:
                     "period": {
                         "type": "string",
                         "default": "1mo",
-                        "description": "Time period (1mo, 3mo, 6mo, 1y)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                     "use_ai": {
                         "type": "boolean",
@@ -145,6 +147,11 @@ async def list_tools() -> list[Tool]:
                         "default": "signals",
                         "description": "Comparison metric",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["symbols"],
             },
@@ -169,6 +176,11 @@ async def list_tools() -> list[Tool]:
                         "default": 20,
                         "description": "Maximum results to return",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["criteria"],
             },
@@ -186,7 +198,7 @@ async def list_tools() -> list[Tool]:
                     "period": {
                         "type": "string",
                         "default": "1mo",
-                        "description": "Time period (1mo, 3mo, 6mo, 1y)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": ["symbol"],
@@ -207,6 +219,11 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "default": 10,
                         "description": "Maximum results (1-50)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": [],
@@ -240,6 +257,11 @@ async def list_tools() -> list[Tool]:
                         },
                         "description": "List of open positions",
                     },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                    },
                 },
                 "required": ["positions"],
             },
@@ -259,6 +281,11 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "default": "US",
                         "description": "Market region (US, EU, ASIA)",
+                    },
+                    "period": {
+                        "type": "string",
+                        "default": "1mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                     },
                 },
                 "required": [],
@@ -281,7 +308,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "description": "Time period (1d, 1mo, 3mo)",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
                         "default": "1mo",
                     },
                     "window": {
@@ -467,12 +494,14 @@ async def analyze_security(
 async def compare_securities(
     symbols: list[str],
     metric: str = "signals",
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Compare multiple securities.
 
     Args:
         symbols: List of ticker symbols.
         metric: Comparison metric.
+        period: Time period for analysis.
 
     Returns:
         Comparison result with ranked securities.
@@ -480,11 +509,11 @@ async def compare_securities(
     symbols = symbols[:MAX_SYMBOLS_COMPARE]
     results: list[dict[str, Any]] = []
 
-    logger.info("Comparing %d securities", len(symbols))
+    logger.info("Comparing %d securities (period: %s)", len(symbols), period)
 
     for symbol in symbols:
         try:
-            analysis = await analyze_security(symbol, period="1mo")
+            analysis = await analyze_security(symbol, period=period)
             results.append({
                 "symbol": symbol,
                 "score": analysis["summary"]["avg_score"],
@@ -511,6 +540,7 @@ async def screen_securities(
     universe: str = "sp500",
     criteria: dict[str, Any] | None = None,
     limit: int = 20,
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Screen securities against criteria.
 
@@ -518,6 +548,7 @@ async def screen_securities(
         universe: Universe name (sp500, nasdaq100, etc.).
         criteria: Screening criteria.
         limit: Maximum results.
+        period: Time period for analysis.
 
     Returns:
         Screening result with matches.
@@ -534,13 +565,13 @@ async def screen_securities(
             "criteria": criteria,
         }
 
-    logger.info("Screening %d securities from %s", len(symbols), universe)
+    logger.info("Screening %d securities from %s (period: %s)", len(symbols), universe, period)
 
     matches: list[dict[str, Any]] = []
 
     for symbol in symbols:
         try:
-            analysis = await analyze_security(symbol, period="1mo")
+            analysis = await analyze_security(symbol, period=period)
 
             if _meets_criteria(analysis, criteria):
                 matches.append({
@@ -661,6 +692,7 @@ async def get_trade_plan(
 async def scan_trades(
     universe: str = "sp500",
     max_results: int = 10,
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Scan universe for qualified trade setups.
 
@@ -671,14 +703,15 @@ async def scan_trades(
     Args:
         universe: Universe to scan (sp500, nasdaq100, etf_large_cap, crypto).
         max_results: Maximum results to return (1-50).
+        period: Time period for analysis.
 
     Returns:
         Scan results with qualified setups.
     """
-    logger.info("Scanning %s universe for trades (max_results: %d)", universe, max_results)
+    logger.info("Scanning %s universe for trades (period: %s, max_results: %d)", universe, period, max_results)
 
     scanner = TradeScanner(max_concurrent=10)
-    result = await scanner.scan_universe(universe, max_results, period="1mo")
+    result = await scanner.scan_universe(universe, max_results, period=period)
 
     logger.info(
         "Scan complete for %s: found %d qualified trades from %d scanned",
@@ -692,6 +725,7 @@ async def scan_trades(
 
 async def portfolio_risk(
     positions: list[dict[str, Any]],
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Assess aggregate risk across portfolio positions.
 
@@ -701,14 +735,15 @@ async def portfolio_risk(
 
     Args:
         positions: List of position dicts with symbol, shares, entry_price.
+        period: Time period for analysis.
 
     Returns:
         Portfolio risk assessment with aggregate and position-level metrics.
     """
-    logger.info("Assessing portfolio risk across %d positions", len(positions))
+    logger.info("Assessing portfolio risk across %d positions (period: %s)", len(positions), period)
 
     assessor = PortfolioRiskAssessor()
-    result = await assessor.assess_positions(positions)
+    result = await assessor.assess_positions(positions, period=period)
 
     logger.info(
         "Portfolio assessment complete: total_value=%.2f, max_loss=%.2f, risk_level=%s",
@@ -723,6 +758,7 @@ async def portfolio_risk(
 async def morning_brief(
     watchlist: list[str] | None = None,
     market_region: str = "US",
+    period: str = DEFAULT_PERIOD,
 ) -> dict[str, Any]:
     """Generate daily market briefing with signals and market conditions.
 
@@ -732,14 +768,15 @@ async def morning_brief(
     Args:
         watchlist: Optional list of symbols (default: top tech/finance stocks).
         market_region: Market region (US, EU, ASIA).
+        period: Time period for analysis.
 
     Returns:
         Morning brief with market status, events, signals, and themes.
     """
-    logger.info("Generating morning brief for region: %s", market_region)
+    logger.info("Generating morning brief for region: %s (period: %s)", market_region, period)
 
     generator = MorningBriefGenerator()
-    result = await generator.generate_brief(watchlist, market_region)
+    result = await generator.generate_brief(watchlist, market_region, period=period)
 
     logger.info(
         "Morning brief complete: %d symbols analyzed, %d themes detected",

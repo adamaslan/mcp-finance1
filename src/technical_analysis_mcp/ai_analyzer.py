@@ -210,7 +210,7 @@ Return ONLY valid JSON (no markdown, no code blocks). Use this exact structure:
     def _build_comparison_prompt(self, result: dict[str, Any]) -> str:
         """Build prompt for compare_securities AI analysis."""
         comparison = result.get("comparison", [])
-        winner = result.get("winner", {})
+        winner = result.get("winner")
 
         prompt = f"""You are an expert stock analyst. Compare these securities and recommend the best pick.
 
@@ -224,10 +224,16 @@ Return ONLY valid JSON (no markdown, no code blocks). Use this exact structure:
    - Signals: {item['bullish']} bullish / {item['bearish']} bearish
 """
 
+        # Handle case where all symbols failed to analyze
+        if winner:
+            winner_text = f"{winner.get('symbol', 'NONE')} with score {winner.get('score', 0):.1f}"
+        else:
+            winner_text = "NONE - All symbols failed to analyze"
+
         prompt += f"""
 
 # CURRENT WINNER
-{winner.get('symbol', 'NONE')} with score {winner.get('score', 0):.1f}
+{winner_text}
 
 # YOUR TASK
 
