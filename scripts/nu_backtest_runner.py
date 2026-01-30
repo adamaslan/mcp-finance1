@@ -1,0 +1,60 @@
+"""nu_backtest_runner.py — lightweight runner for backtests
+
+Usage:
+  python nu_backtest_runner.py run --config backtests.yml --id momentum_standard --mcp MCP1
+  python nu_backtest_runner.py run-batch --config backtests.yml --ids momentum_standard,transaction_cost_sweep
+"""
+import argparse
+import yaml
+import os
+from pathlib import Path
+
+from scripts.backtests.momentum_backtest import run_momentum_backtest
+from scripts.backtests.transaction_cost_sweep import run_transaction_cost_sweep
+
+OUT_DIR = Path('outputs')
+OUT_DIR.mkdir(exist_ok=True)
+
+
+def load_config(path):
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def main():
+    p = argparse.ArgumentParser()
+    sub = p.add_subparsers(dest='cmd')
+
+    run = sub.add_parser('run')
+    run.add_argument('--config', required=True)
+    run.add_argument('--id', required=True)
+    run.add_argument('--mcp', required=False)
+
+    batch = sub.add_parser('run-batch')
+    batch.add_argument('--config', required=True)
+    batch.add_argument('--ids', required=True)
+
+    args = p.parse_args()
+    cfg = load_config(args.config)
+
+    if args.cmd == 'run':
+        bt_id = args.id
+        # dispatch
+        if bt_id.startswith('momentum'):
+            run_momentum_backtest(cfg, bt_id, args.mcp)
+        elif bt_id == 'transaction_cost_sweep':
+            run_transaction_cost_sweep(cfg, bt_id, args.mcp)
+        else:
+            raise NotImplementedError(f'Backtest {bt_id} not implemented')
+
+    elif args.cmd == 'run-batch':
+        for bt in args.ids.split(','):
+            if bt.startswith('momentum'):
+                run_momentum_backtest(cfg, bt, None)
+            elif bt == 'transaction_cost_sweep':
+                run_transaction_cost_sweep(cfg, bt, None)
+            else:
+                print('skipping', bt)
+
+if __name__ == '__main__':
+    main()
