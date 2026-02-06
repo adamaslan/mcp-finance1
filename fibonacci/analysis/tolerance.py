@@ -15,13 +15,13 @@ class AdaptiveTolerance:
     More volatile markets get wider tolerance bands.
     """
 
-    def __init__(self, df: pd.DataFrame, base_tolerance: float = 0.01):
+    def __init__(self, df: pd.DataFrame, base_tolerance: float = 0.02):
         """
         Initialize tolerance calculator.
 
         Args:
             df: DataFrame with OHLCV price data
-            base_tolerance: Base tolerance percentage (default 1%)
+            base_tolerance: Base tolerance percentage (default 2% - swing trading optimized)
         """
         self.df = df
         self.base_tolerance = base_tolerance

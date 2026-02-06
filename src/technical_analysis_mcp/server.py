@@ -119,8 +119,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                     "use_ai": {
                         "type": "boolean",
@@ -149,8 +149,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": ["symbols"],
@@ -178,8 +178,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": ["criteria"],
@@ -197,8 +197,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": ["symbol"],
@@ -222,8 +222,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": [],
@@ -259,8 +259,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": ["positions"],
@@ -284,8 +284,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "period": {
                         "type": "string",
-                        "default": "1mo",
-                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y)",
+                        "default": "3mo",
+                        "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
                 },
                 "required": [],
@@ -313,8 +313,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "window": {
                         "type": "integer",
-                        "description": "Lookback window for swing detection",
-                        "default": 50,
+                        "description": "Lookback window for swing detection - SWING TRADING: 150 bars captures multi-day swings",
+                        "default": 150,
                     },
                 },
                 "required": ["symbol"],
@@ -346,8 +346,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "min_volume": {
                         "type": "integer",
-                        "default": 10,
-                        "description": "Minimum volume threshold for liquid options",
+                        "default": 75,
+                        "description": "Minimum volume threshold for liquid options - SWING TRADING: 75 ensures adequate liquidity",
                     },
                 },
                 "required": ["symbol"],
@@ -789,8 +789,8 @@ async def morning_brief(
 
 async def analyze_fibonacci(
     symbol: str,
-    period: str = "1mo",
-    window: int = 50,
+    period: str = "3mo",
+    window: int = 150,
 ) -> dict[str, Any]:
     """Analyze Fibonacci levels, signals, and clusters for a security.
 
@@ -1264,7 +1264,7 @@ async def options_risk_analysis(
     symbol: str,
     expiration_date: str | None = None,
     option_type: str = "both",
-    min_volume: int = 10,
+    min_volume: int = 75,
 ) -> dict[str, Any]:
     """Analyze options chain risk metrics for a security using real yfinance data.
 
@@ -1580,7 +1580,7 @@ async def record_fibonacci_signals(
 
 async def calculate_signal_performance(
     symbol: str | None = None,
-    lookback_days: int = 90,
+    lookback_days: int = 180,  # SWING TRADING: 6-month lookback for robust signal performance
     min_confluence: float = 30,
     min_strength: str = "MODERATE",
     db_connection: Any | None = None,
