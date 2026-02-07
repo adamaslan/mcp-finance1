@@ -38,6 +38,7 @@ try:
         portfolio_risk as mcp_portfolio_risk,
         morning_brief as mcp_morning_brief,
         analyze_fibonacci as mcp_analyze_fibonacci,
+        options_risk_analysis as mcp_options_risk_analysis,
     )
     MCP_AVAILABLE = True
     logger.info("✅ MCP server functions imported successfully")
@@ -50,6 +51,7 @@ except ImportError as e:
     mcp_portfolio_risk = None
     mcp_morning_brief = None
     mcp_analyze_fibonacci = None
+    mcp_options_risk_analysis = None
 
 # Initialize GCP clients (optional for local testing)
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "ttb-lang1")
@@ -125,6 +127,11 @@ class FibonacciRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
     period: str = Field("1d", description="Time period (1d, 1mo, 3mo)")
     window: int = Field(50, description="Lookback window for swing detection")
+
+class OptionsRiskRequest(BaseModel):
+    symbol: str = Field(..., description="Stock symbol (e.g., AAPL)")
+    option_type: str = Field("both", description="Option type: calls, puts, or both")
+    min_volume: int = Field(10, description="Minimum volume filter")
 
 # ============================================================================
 # UTILITY FUNCTIONS
@@ -512,6 +519,29 @@ async def fibonacci_analysis(request: FibonacciRequest):
         return result
     except Exception as e:
         logger.error(f"Fibonacci analysis error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/options-risk")
+async def options_risk_analysis_endpoint(request: OptionsRiskRequest):
+    """Analyze options risk for a security (puts/calls, PCR, IV, OI)"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        logger.info(f"Options risk analysis requested for {request.symbol} (type: {request.option_type})")
+        result = await mcp_options_risk_analysis(
+            symbol=request.symbol,
+            option_type=request.option_type,
+            min_volume=request.min_volume
+        )
+        logger.info(f"Options risk analysis completed for {request.symbol}")
+        return result
+    except Exception as e:
+        logger.error(f"Options risk analysis error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

@@ -13,25 +13,26 @@ CACHE_TTL_SECONDS: Final[int] = 300  # 5 minutes
 CACHE_MAX_SIZE: Final[int] = 100  # Maximum symbols to cache
 
 # Data Fetching
-DEFAULT_PERIOD: Final[str] = "1mo"
+# SWING TRADING CONFIG: Extended periods for multi-day trend analysis
+DEFAULT_PERIOD: Final[str] = "3mo"
 VALID_PERIODS: Final[tuple[str, ...]] = (
     "15m", "1h", "4h", "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
 )
 MAX_RETRY_ATTEMPTS: Final[int] = 3
 RETRY_BACKOFF_SECONDS: Final[float] = 1.0
 
-# Indicator Periods
+# Indicator Periods - OPTIMIZED FOR SWING TRADING
 MA_PERIODS: Final[tuple[int, ...]] = (5, 10, 20, 50, 100, 200)
-RSI_PERIOD: Final[int] = 14
-MACD_FAST: Final[int] = 12
-MACD_SLOW: Final[int] = 26
-MACD_SIGNAL: Final[int] = 9
+RSI_PERIOD: Final[int] = 24  # Swing trading: smoother, fewer whipsaws (was 14)
+MACD_FAST: Final[int] = 20  # Swing trading: longer periods (was 12)
+MACD_SLOW: Final[int] = 50  # Swing trading: longer periods (was 26)
+MACD_SIGNAL: Final[int] = 20  # Swing trading: longer signal line (was 9)
 BOLLINGER_PERIOD: Final[int] = 20
 BOLLINGER_STD: Final[float] = 2.0
 STOCHASTIC_K_PERIOD: Final[int] = 14
 STOCHASTIC_D_PERIOD: Final[int] = 3
-ADX_PERIOD: Final[int] = 14
-ATR_PERIOD: Final[int] = 14
+ADX_PERIOD: Final[int] = 25  # Swing trading: stronger trend identification (was 14)
+ATR_PERIOD: Final[int] = 14  # Keep for stop loss calculations
 VOLUME_MA_SHORT: Final[int] = 20
 VOLUME_MA_LONG: Final[int] = 50
 
@@ -43,8 +44,9 @@ MIN_DATA_POINTS_200MA: Final[int] = 200
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL: Final[str] = "gemini-2.0-flash-exp"
 
-# Analysis Limits
-MAX_SIGNALS_RETURNED: Final[int] = 50
+# Analysis Limits - SWING TRADING OPTIMIZATION
+# Reduce signal count to prevent analysis paralysis (was 50)
+MAX_SIGNALS_RETURNED: Final[int] = 12
 MAX_SYMBOLS_COMPARE: Final[int] = 10
 MAX_SYMBOLS_SCREEN: Final[int] = 100
 
@@ -128,14 +130,15 @@ VOLATILITY_HIGH_THRESHOLD: Final[float] = 3.0  # > 3.0% = HIGH
 STOP_MIN_ATR_MULTIPLE: Final[float] = 0.5  # Minimum: 0.5 ATR
 STOP_MAX_ATR_MULTIPLE: Final[float] = 3.0  # Maximum: 3.0 ATR
 
-# Timeframe-specific ATR multiples for stops
-STOP_ATR_SWING: Final[float] = 2.0  # Swing trades: 2 ATR stop
+# Timeframe-specific ATR multiples for stops - SWING TRADING ADJUSTED
+# Wider stops for larger price movements typical in swing trading
+STOP_ATR_SWING: Final[float] = 2.5  # Swing trades: 2.5 ATR stop (was 2.0, increased for volatility)
 STOP_ATR_DAY: Final[float] = 1.5  # Day trades: 1.5 ATR stop
 STOP_ATR_SCALP: Final[float] = 1.0  # Scalp trades: 1 ATR stop
 
-# Risk-to-Reward Requirements
-MIN_RR_RATIO: Final[float] = 1.5  # Minimum 1.5:1 R:R
-PREFERRED_RR_RATIO: Final[float] = 2.0  # Preferred 2:1 R:R
+# Risk-to-Reward Requirements - SWING TRADING OPTIMIZED
+MIN_RR_RATIO: Final[float] = 2.0  # Minimum 2:1 R:R for swing trades (was 1.5)
+PREFERRED_RR_RATIO: Final[float] = 3.0  # Preferred 3:1 R:R for swing trades (was 2.0)
 
 # Trend Thresholds
 ADX_TRENDING_THRESHOLD: Final[float] = 25.0  # ADX > 25 = trending
@@ -151,12 +154,33 @@ MAX_CONFLICTING_SIGNALS_RATIO: Final[float] = 0.4  # If >40% signals conflict, s
 # Volume Requirements
 MIN_VOLUME_RATIO: Final[float] = 0.5  # Current volume >= 50% of average
 
-# Options Integration (Full Suggestions)
-OPTION_MIN_EXPECTED_MOVE: Final[float] = 3.0  # Min 3% move for options consideration
-OPTION_SWING_MIN_DTE: Final[int] = 30  # Minimum 30 DTE for swing options
-OPTION_SWING_MAX_DTE: Final[int] = 45  # Maximum 45 DTE for swing options
-OPTION_CALL_DELTA_MIN: Final[float] = 0.40  # Min delta for calls
-OPTION_CALL_DELTA_MAX: Final[float] = 0.60  # Max delta for calls
-OPTION_PUT_DELTA_MIN: Final[float] = -0.60  # Min delta for puts
-OPTION_PUT_DELTA_MAX: Final[float] = -0.40  # Max delta for puts
-OPTION_SPREAD_WIDTH_ATR: Final[float] = 1.0  # Spread width as ATR multiple
+# Options Integration (Full Suggestions) - SWING TRADING OPTIMIZED
+OPTION_MIN_EXPECTED_MOVE: Final[float] = 4.0  # Min 4% move for swing option consideration (was 3%)
+OPTION_SWING_MIN_DTE: Final[int] = 35  # Minimum 35 DTE for swing options (was 30)
+OPTION_SWING_MAX_DTE: Final[int] = 60  # Maximum 60 DTE for swing options (was 45)
+OPTION_CALL_DELTA_MIN: Final[float] = 0.35  # Min delta for calls (wider range, was 0.40)
+OPTION_CALL_DELTA_MAX: Final[float] = 0.70  # Max delta for calls (wider range, was 0.60)
+OPTION_PUT_DELTA_MIN: Final[float] = -0.70  # Min delta for puts (wider range, was -0.60)
+OPTION_PUT_DELTA_MAX: Final[float] = -0.35  # Max delta for puts (wider range, was -0.40)
+OPTION_SPREAD_WIDTH_ATR: Final[float] = 1.5  # Spread width as ATR multiple (was 1.0)
+
+# ============================================================================
+# SWING TRADING CONFIGURATION SUMMARY
+# ============================================================================
+# Updated February 5, 2026 for swing trading optimization
+#
+# KEY CHANGES FROM DAY TRADING DEFAULTS:
+# ✓ DEFAULT_PERIOD: 1mo → 3mo (captures multi-week trends)
+# ✓ RSI_PERIOD: 14 → 24 (less whipsaw, clearer signals)
+# ✓ MACD: (12,26,9) → (20,50,20) (longer-term trend identification)
+# ✓ ADX_PERIOD: 14 → 25 (stronger trend confirmation)
+# ✓ STOP_ATR_SWING: 2.0 → 2.5 ATR (accommodate larger price swings)
+# ✓ MAX_SIGNALS_RETURNED: 50 → 12 (focus on quality, prevent paralysis)
+# ✓ MIN_RR_RATIO: 1.5:1 → 2.0:1 (higher reward threshold)
+# ✓ PREFERRED_RR_RATIO: 2.0:1 → 3.0:1 (quality setups)
+# ✓ Fibonacci window: 50 → 150 bars (multi-day swing highs/lows)
+# ✓ Fibonacci tolerance: 1% → 2% (balance sensitivity vs noise)
+# ✓ options min_volume: 10 → 75 (ensure adequate liquidity)
+# ✓ lookback_days: 90 → 180 (robust signal validation)
+# ✓ Options DTE: 30-45 → 35-60 days (swing duration)
+# ✓ Options delta: narrower → wider (more flexibility)
