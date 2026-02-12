@@ -1,6 +1,7 @@
 """Pre-defined risk profile configurations."""
 
 from typing import Any
+from dataclasses import replace
 
 from .base_config import (
     UserConfig,
@@ -174,23 +175,46 @@ def get_profile_with_overrides(
             Example: {"rsi_oversold": 28, "min_rr_ratio": 1.8}
 
     Returns:
-        UserConfig with overrides applied
+        UserConfig with overrides actually applied to nested dataclass fields
 
-    Note:
-        Custom overrides are merged into the base profile's custom_overrides.
-        This tracks what was customized for reporting/auditing.
+    Example:
+        >>> config = get_profile_with_overrides("neutral", {"rsi_oversold": 28})
+        >>> assert config.indicators.rsi_oversold == 28  # ACTUALLY CHANGED
     """
     base = get_profile(profile)
 
     if not overrides:
         return base
 
-    # Create new config with overrides tracked
+    # Separate overrides by nested config type
+    indicator_overrides = {}
+    risk_overrides = {}
+    momentum_overrides = {}
+    signal_overrides = {}
+
+    for key, value in overrides.items():
+        # Map override keys to their nested config sections
+        if key.startswith("rsi_") or key.startswith("macd_") or key.startswith("bollinger_") or key.startswith("stochastic_") or key.startswith("adx_") or key.startswith("atr_") or key == "ma_periods":
+            indicator_overrides[key] = value
+        elif key.startswith("stop_") or key.startswith("volatility_") or key.startswith("adx_") or key in ["min_rr_ratio", "preferred_rr_ratio", "max_rr_ratio", "max_position_risk_pct", "max_portfolio_heat", "max_conflicting_ratio", "min_volume_ratio"]:
+            risk_overrides[key] = value
+        elif key.startswith("momentum_") or key.startswith("trend_"):
+            momentum_overrides[key] = value
+        elif key.startswith("weight_") or key in ["max_signals_returned", "max_trade_plans", "category_weights"]:
+            signal_overrides[key] = value
+
+    # Apply overrides to nested dataclasses using dataclasses.replace()
+    new_indicators = replace(base.indicators, **indicator_overrides) if indicator_overrides else base.indicators
+    new_risk = replace(base.risk, **risk_overrides) if risk_overrides else base.risk
+    new_momentum = replace(base.momentum, **momentum_overrides) if momentum_overrides else base.momentum
+    new_signals = replace(base.signals, **signal_overrides) if signal_overrides else base.signals
+
+    # Create new UserConfig with applied overrides
     return UserConfig(
         risk_profile=base.risk_profile,
-        indicators=base.indicators,
-        risk=base.risk,
-        momentum=base.momentum,
-        signals=base.signals,
-        custom_overrides=overrides,
+        indicators=new_indicators,
+        risk=new_risk,
+        momentum=new_momentum,
+        signals=new_signals,
+        custom_overrides=overrides,  # Track what was customized
     )
