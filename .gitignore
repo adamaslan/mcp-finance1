@@ -87,6 +87,43 @@ package-lock.json
 
 
 
+# Generated Documentation with Sensitive Data
+# (Reports, test results, API responses with real data)
+reports/*.json
+reports/*.csv
+reports/*.xlsx
+backend_test_results/*/raw_data/
+backend_test_results/*_UNREVIEWED.md
+backend_test_results/*_raw*.json
+test_results_with_data/
+api_responses/
+database_exports/
+*.db
+*.sqlite
+*.sqlite3
+
+# Exported Data Files (may contain PII/financial data)
+exports/
+dumps/
+backups/
+data_backup/
+*.sql
+*.sql.gz
+*.dump
+
+# Screenshots with sensitive content
+screenshots/*auth*
+screenshots/*api*
+screenshots/*key*
+screenshots/*token*
+screenshots/*secret*
+screenshots/*credential*
+
+# Generated analysis/audit files with real data
+analysis_results_*_raw/
+audit_logs_*_raw/
+security_scan_results_unreviewed/
+
 # Misc
 *.seed
 *.seed.js
