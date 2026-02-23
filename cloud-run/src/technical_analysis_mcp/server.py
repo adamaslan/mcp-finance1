@@ -12,6 +12,9 @@ from typing import Any
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
+import numpy as np
+import pandas as pd
+
 from .config import DEFAULT_PERIOD, MAX_SIGNALS_RETURNED, MAX_SYMBOLS_COMPARE
 from .data import AnalysisResultCache, CachedDataFetcher, DataFetcher
 from .exceptions import DataFetchError, TechnicalAnalysisError
@@ -650,12 +653,205 @@ async def morning_brief(
     logger.info("Generating morning brief for region: %s", market_region)
 
     generator = MorningBriefGenerator()
-    result = await generator.generate_brief(watchlist, market_region, period=period)
+    result = await generator.generate_brief(watchlist, market_region)
 
     logger.info(
         "Morning brief complete: %d symbols analyzed, %d themes detected",
         len(result.get("watchlist_signals", [])),
         len(result.get("key_themes", [])),
+    )
+
+    return result
+
+
+def calculate_adaptive_tolerance(level_prices: list[float]) -> float:
+    """Calculate adaptive tolerance based on price distribution of Fibonacci levels."""
+    if not level_prices or len(level_prices) < 3:
+        return 0.015
+
+    prices = np.array(level_prices, dtype=np.float64)
+    price_diffs = np.diff(prices)
+
+    if np.sum(price_diffs) == 0:
+        return 0.015
+
+    pct_diffs = price_diffs / prices[:-1]
+
+    try:
+        percentile_25_gap = np.quantile(pct_diffs, 0.25)
+    except (IndexError, ValueError):
+        return 0.015
+
+    adaptive_tolerance = np.clip(percentile_25_gap * 0.4, 0.005, 0.05)
+    return float(adaptive_tolerance)
+
+
+async def analyze_fibonacci(
+    symbol: str,
+    period: str = "3mo",
+    window: int = 150,
+) -> dict[str, Any]:
+    """Analyze Fibonacci levels, signals, and clusters for a security."""
+    from fibonacci.analysis.context import FibonacciContext
+    from fibonacci.signals import (
+        PriceLevelSignals,
+        BounceSignals,
+        BreakoutSignals,
+        ChannelSignals,
+        ClusterSignals,
+        GoldenPocketSignals,
+    )
+
+    symbol = symbol.upper().strip()
+    logger.info("Analyzing Fibonacci for %s (period: %s, window: %d)", symbol, period, window)
+
+    fetcher = get_data_fetcher()
+    df = fetcher.fetch(symbol, period)
+    df = calculate_all_indicators(df)
+
+    current = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else current
+    current_price = float(current["Close"])
+
+    recent_df = df.tail(window)
+    swing_high = float(recent_df["High"].max())
+    swing_low = float(recent_df["Low"].min())
+    swing_range = swing_high - swing_low
+
+    if swing_range <= 0:
+        return {
+            "symbol": symbol,
+            "timestamp": datetime.now().isoformat(),
+            "price": current_price,
+            "swingHigh": swing_high,
+            "swingLow": swing_low,
+            "swingRange": swing_range,
+            "levels": [],
+            "signals": [],
+            "clusters": [],
+            "summary": {"totalSignals": 0, "byCategory": {}, "strongestLevel": "", "confluenceZones": 0},
+        }
+
+    def safe_float(val: Any) -> float:
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.0
+
+    context = FibonacciContext(
+        df=df,
+        interval=period,
+        current=current,
+        prev=prev,
+        safe_float_fn=safe_float,
+    )
+
+    from fibonacci.core.registry import FibonacciLevelRegistry
+
+    registry = FibonacciLevelRegistry()
+    fib_levels = context.get_fib_levels(window)
+
+    levels_data = []
+    for key, level in fib_levels.items():
+        if level.price is not None:
+            distance = abs(current_price - level.price) / current_price if current_price > 0 else 0
+            levels_data.append({
+                "key": key,
+                "ratio": level.ratio,
+                "name": level.name,
+                "type": level.fib_type.value,
+                "price": level.price,
+                "strength": level.strength.value,
+                "distanceFromCurrent": distance,
+            })
+
+    levels_df = pd.DataFrame(levels_data)
+    if len(levels_df) > 0:
+        levels_df = levels_df.sort_values("distanceFromCurrent").reset_index(drop=True)
+        all_levels = levels_df.to_dict("records")
+    else:
+        all_levels = []
+
+    signal_generators = [
+        PriceLevelSignals(),
+        BounceSignals(),
+        BreakoutSignals(),
+        ChannelSignals(),
+        GoldenPocketSignals(),
+        ClusterSignals(),
+    ]
+
+    all_signals = []
+    for generator in signal_generators:
+        try:
+            generated = generator.generate(context)
+            all_signals.extend(generated)
+        except Exception as e:
+            logger.warning("Signal generator %s failed: %s", generator.__class__.__name__, e)
+
+    signals = []
+    for sig in all_signals:
+        signals.append({
+            "signal": sig.signal,
+            "description": sig.description,
+            "strength": sig.strength,
+            "category": sig.category,
+            "timeframe": getattr(sig, "timeframe", None),
+            "value": getattr(sig, "value", 0),
+            "metadata": getattr(sig, "metadata", None) or {},
+        })
+
+    # Cluster detection
+    clusters = []
+    if len(levels_df) > 1:
+        levels_sorted = levels_df.sort_values("price").reset_index(drop=True)
+        price_diffs = levels_sorted["price"].diff().fillna(0).abs()
+        tolerance = 0.01
+        price_pct_diffs = (price_diffs / levels_sorted["price"]).fillna(0) > tolerance
+        cluster_boundaries = price_pct_diffs.astype(int).diff().fillna(0)
+        levels_sorted["cluster_id"] = cluster_boundaries.cumsum()
+
+        for cluster_id, group in levels_sorted.groupby("cluster_id"):
+            if len(group) >= 2:
+                center_price = group["price"].mean()
+                cluster_types = set(group["type"].tolist())
+                clusters.append({
+                    "centerPrice": round(center_price, 2),
+                    "levels": group["name"].tolist(),
+                    "levelCount": len(group),
+                    "strength": "STRONG" if len(group) >= 3 else "MODERATE",
+                    "type": "MIXED" if len(cluster_types) > 1 else group["type"].iloc[0],
+                })
+
+    # Summary
+    category_counts: dict[str, int] = {}
+    for sig in signals:
+        cat = sig["category"]
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    strongest_level = all_levels[0] if all_levels else {"name": "", "distanceFromCurrent": 0}
+
+    result = {
+        "symbol": symbol,
+        "timestamp": datetime.now().isoformat(),
+        "price": current_price,
+        "swingHigh": swing_high,
+        "swingLow": swing_low,
+        "swingRange": swing_range,
+        "levels": all_levels[:50],
+        "signals": signals[:100],
+        "clusters": clusters,
+        "summary": {
+            "totalSignals": len(signals),
+            "byCategory": category_counts,
+            "strongestLevel": strongest_level.get("name", ""),
+            "confluenceZoneCount": len(clusters),
+        },
+    }
+
+    logger.info(
+        "Fibonacci analysis complete for %s: %d levels, %d signals, %d clusters",
+        symbol, len(all_levels), len(signals), len(clusters)
     )
 
     return result

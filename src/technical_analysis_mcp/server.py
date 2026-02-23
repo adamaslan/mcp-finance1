@@ -325,7 +325,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="options_risk_analysis",
             description=(
-                "Analyze options chain risk metrics using real yfinance data. "
+                "Analyze options chain risk metrics using real market data. "
                 "Includes IV analysis, Greeks (Delta, Gamma, Theta, Vega), "
                 "volume/open interest analysis, Put/Call ratio, and risk warnings. "
                 "Provides actionable insights for options trading strategies."
@@ -1315,10 +1315,10 @@ async def options_risk_analysis(
     option_type: str = "both",
     min_volume: int = 75,
 ) -> dict[str, Any]:
-    """Analyze options chain risk metrics for a security using real yfinance data.
+    """Analyze options chain risk metrics for a security using real market data.
 
     Comprehensive options risk analysis including:
-    - Real options chain data from yfinance
+    - Real options chain data from Finnhub/Alpha Vantage
     - IV (Implied Volatility) analysis
     - Greeks analysis (Delta, Gamma, Theta, Vega)
     - Volume and open interest analysis

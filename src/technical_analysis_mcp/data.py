@@ -1,15 +1,16 @@
 """Data fetching and caching for market data.
 
-Provides abstractions for fetching stock data from yfinance with
-caching, retry logic, and proper error handling.
+Provides abstractions for fetching stock data from Finnhub (primary)
+and Alpha Vantage (fallback) with caching, retry logic, and proper error handling.
+No yfinance dependency.
 """
 
 import logging
+import os
 import time
 from typing import Any, Protocol
 
 import pandas as pd
-import yfinance as yf
 from cachetools import TTLCache
 
 from .config import (
@@ -42,22 +43,31 @@ class DataFetcher(Protocol):
         ...
 
 
-class YFinanceDataFetcher:
-    """Fetches market data from Yahoo Finance with retry logic."""
+class FinnhubAlphaDataFetcher:
+    """Fetches market data from Finnhub (primary) or Alpha Vantage (fallback) with retry logic."""
 
     def __init__(
         self,
+        finnhub_key: str | None = None,
+        alpha_vantage_key: str | None = None,
         max_retries: int = MAX_RETRY_ATTEMPTS,
         backoff_seconds: float = RETRY_BACKOFF_SECONDS,
     ):
         """Initialize the data fetcher.
 
         Args:
+            finnhub_key: Finnhub API key (from env if not provided).
+            alpha_vantage_key: Alpha Vantage API key (from env if not provided).
             max_retries: Maximum retry attempts on failure.
             backoff_seconds: Base backoff time between retries.
         """
+        self._finnhub_key = finnhub_key or os.getenv("FINNHUB_API_KEY", "")
+        self._alpha_vantage_key = alpha_vantage_key or os.getenv("ALPHA_VANTAGE_KEY", "")
         self._max_retries = max_retries
         self._backoff = backoff_seconds
+
+        if not self._finnhub_key:
+            logger.warning("FINNHUB_API_KEY not set - Finnhub data fetching will fail")
 
     def fetch(self, symbol: str, period: str = DEFAULT_PERIOD) -> pd.DataFrame:
         """Fetch OHLCV data from yfinance with retries.
@@ -120,17 +130,104 @@ class YFinanceDataFetcher:
         raise DataFetchError(symbol, period, f"Failed after {self._max_retries} attempts: {last_error}")
 
     def _fetch_data(self, symbol: str, period: str) -> pd.DataFrame:
-        """Perform the actual yfinance fetch.
+        """Perform the actual Finnhub/AV fetch.
 
         Args:
             symbol: Ticker symbol.
             period: Time period.
 
         Returns:
-            Raw DataFrame from yfinance.
+            Raw DataFrame from Finnhub or Alpha Vantage.
+
+        Raises:
+            DataFetchError: If both Finnhub and AV fail.
         """
-        ticker = yf.Ticker(symbol)
-        return ticker.history(period=period)
+        import finnhub
+        import httpx
+
+        # Try Finnhub first
+        if self._finnhub_key:
+            try:
+                client = finnhub.Client(api_key=self._finnhub_key)
+                # Map period to Finnhub resolution/lookback
+                period_map = {
+                    "1d": ("5", 1),
+                    "5d": ("15", 5),
+                    "1mo": ("D", 30),
+                    "3mo": ("D", 90),
+                    "6mo": ("D", 180),
+                    "1y": ("D", 365),
+                    "2y": ("W", 730),
+                    "5y": ("W", 1825),
+                    "10y": ("M", 3650),
+                    "max": ("W", 7300),
+                }
+                resolution, lookback = period_map.get(period, ("D", 365))
+
+                candles = client.stock_candle(symbol, resolution)
+
+                if not candles or "o" not in candles:
+                    raise DataFetchError(symbol, period, "No candle data from Finnhub")
+
+                df = pd.DataFrame({
+                    "Open": candles["o"],
+                    "High": candles["h"],
+                    "Low": candles["l"],
+                    "Close": candles["c"],
+                    "Volume": candles.get("v", [0] * len(candles["c"])),
+                })
+                df.index = pd.to_datetime(candles.get("t", range(len(df))), unit="s")
+                return df
+            except Exception as e:
+                logger.warning("Finnhub fetch failed for %s: %s, trying Alpha Vantage", symbol, e)
+
+        # Fallback to Alpha Vantage
+        if self._alpha_vantage_key:
+            try:
+                av_url = "https://www.alphavantage.co/query"
+                params = {
+                    "function": "TIME_SERIES_DAILY",
+                    "symbol": symbol,
+                    "apikey": self._alpha_vantage_key,
+                    "outputsize": "full"
+                }
+                with httpx.Client() as client:
+                    resp = client.get(av_url, params=params)
+                    data = resp.json()
+
+                if "Time Series (Daily)" not in data:
+                    raise DataFetchError(symbol, period, "No time series from Alpha Vantage")
+
+                ts_data = data["Time Series (Daily)"]
+                dates = []
+                opens = []
+                highs = []
+                lows = []
+                closes = []
+                volumes = []
+
+                for date_str, ohlcv in ts_data.items():
+                    dates.append(pd.to_datetime(date_str))
+                    opens.append(float(ohlcv["1. open"]))
+                    highs.append(float(ohlcv["2. high"]))
+                    lows.append(float(ohlcv["3. low"]))
+                    closes.append(float(ohlcv["4. close"]))
+                    volumes.append(int(float(ohlcv["5. volume"])))
+
+                df = pd.DataFrame({
+                    "Open": opens,
+                    "High": highs,
+                    "Low": lows,
+                    "Close": closes,
+                    "Volume": volumes,
+                }, index=dates)
+                df = df.sort_index()
+                return df
+            except Exception as e:
+                logger.warning("Alpha Vantage fetch failed for %s: %s", symbol, e)
+                raise DataFetchError(symbol, period, f"Both Finnhub and Alpha Vantage failed: {e}")
+
+        raise DataFetchError(symbol, period, "No API keys configured for data fetching")
 
 
 class CachedDataFetcher:
@@ -145,11 +242,11 @@ class CachedDataFetcher:
         """Initialize cached data fetcher.
 
         Args:
-            fetcher: Underlying data fetcher. Defaults to YFinanceDataFetcher.
+            fetcher: Underlying data fetcher. Defaults to FinnhubAlphaDataFetcher.
             cache_ttl: Cache time-to-live in seconds.
             cache_size: Maximum number of items in cache.
         """
-        self._fetcher = fetcher or YFinanceDataFetcher()
+        self._fetcher = fetcher or FinnhubAlphaDataFetcher()
         self._cache: TTLCache[str, pd.DataFrame] = TTLCache(maxsize=cache_size, ttl=cache_ttl)
 
     def fetch(self, symbol: str, period: str = DEFAULT_PERIOD) -> pd.DataFrame:
