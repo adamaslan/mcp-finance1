@@ -3,18 +3,28 @@ Cloud Function: Calculate Technical Indicators
 Location: option2-gcp/cloud-functions/calculate_indicators/main.py
 
 Triggered by: Pub/Sub topic "analyze-request"
-Purpose: Fetch data from yfinance and calculate all technical indicators
+Purpose: Fetch data from Finnhub (primary) / Alpha Vantage (fallback) and calculate technical indicators
 """
 
 import base64
 import json
 import os
+import sys
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 from google.cloud import firestore, pubsub_v1, storage
+
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+try:
+    from technical_analysis_mcp.data import FinnhubAlphaDataFetcher, CachedDataFetcher
+except ImportError:
+    # Fallback if not in cloud run context
+    FinnhubAlphaDataFetcher = None
+    CachedDataFetcher = None
 
 # Initialize clients
 PROJECT_ID = os.environ["GCP_PROJECT_ID"]
@@ -41,13 +51,29 @@ def calculate_indicators(event, context):
     print(f"📊 Processing {symbol} (period: {period})")
     
     try:
-        # Fetch data from yfinance
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period)
-        
+        # Fetch data from Finnhub (primary) / Alpha Vantage (fallback)
+        if FinnhubAlphaDataFetcher is None:
+            raise ImportError("FinnhubAlphaDataFetcher not available")
+
+        finnhub_key = os.getenv("FINNHUB_API_KEY", "")
+        av_key = os.getenv("ALPHA_VANTAGE_KEY", "")
+
+        if not finnhub_key:
+            raise ValueError("FINNHUB_API_KEY environment variable not set")
+
+        # Create data fetcher with caching
+        fetcher = FinnhubAlphaDataFetcher(
+            finnhub_key=finnhub_key,
+            alpha_vantage_key=av_key
+        )
+        cached_fetcher = CachedDataFetcher(fetcher)
+
+        # Fetch data
+        df = cached_fetcher.fetch(symbol, period)
+
         if df.empty:
             raise ValueError(f"No data found for {symbol}")
-        
+
         print(f"✅ Fetched {len(df)} days of data")
         
         # Calculate indicators

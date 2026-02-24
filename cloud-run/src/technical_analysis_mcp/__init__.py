@@ -20,7 +20,7 @@ from .config import (
     SignalCategory,
     SignalStrength,
 )
-from .data import CachedDataFetcher, DataFetcher, YFinanceDataFetcher
+from .data import CachedDataFetcher, DataFetcher, FinnhubAlphaDataFetcher
 from .exceptions import (
     DataFetchError,
     InsufficientDataError,
@@ -66,7 +66,7 @@ __all__ = [
     "RankingError",
     # Data fetching
     "DataFetcher",
-    "YFinanceDataFetcher",
+    "FinnhubAlphaDataFetcher",
     "CachedDataFetcher",
     # Ranking
     "RankingStrategy",
@@ -114,7 +114,7 @@ class TechnicalAnalyzer:
             if use_cache:
                 self._data_fetcher = CachedDataFetcher()
             else:
-                self._data_fetcher = YFinanceDataFetcher()
+                self._data_fetcher = FinnhubAlphaDataFetcher()
         else:
             self._data_fetcher = data_fetcher
 

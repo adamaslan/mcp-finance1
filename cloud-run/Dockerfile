@@ -21,6 +21,7 @@ WORKDIR /app
 # CRITICAL: --chown ensures non-root ownership
 COPY --chown=$MAMBA_USER:$MAMBA_USER *.py ./
 COPY --chown=$MAMBA_USER:$MAMBA_USER src ./src
+COPY --chown=$MAMBA_USER:$MAMBA_USER fibonacci ./fibonacci
 
 # Environment configuration
 ENV PORT=8080

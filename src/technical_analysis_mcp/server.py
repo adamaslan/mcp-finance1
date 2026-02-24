@@ -14,12 +14,14 @@ from mcp.server import Server
 from mcp.types import TextContent, Tool
 
 from .config import DEFAULT_PERIOD, MAX_SIGNALS_RETURNED, MAX_SYMBOLS_COMPARE
+from .config_adapter import ConfigContext, get_config_context
 from .data import AnalysisResultCache, CachedDataFetcher, DataFetcher
 from .exceptions import DataFetchError, TechnicalAnalysisError
 from .briefing import MorningBriefGenerator
 from .formatting import format_analysis, format_comparison, format_screening, format_risk_analysis, format_scan_results, format_portfolio_risk, format_morning_brief
 from .indicators import calculate_all_indicators
 from .portfolio import PortfolioRiskAssessor
+from .profiles.config_manager import get_config_manager
 from .ranking import RankingStrategy, get_ranking_strategy, rank_signals
 from .risk import RiskAssessor
 from .scanners import TradeScanner
@@ -323,7 +325,7 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="options_risk_analysis",
             description=(
-                "Analyze options chain risk metrics using real yfinance data. "
+                "Analyze options chain risk metrics using real market data. "
                 "Includes IV analysis, Greeks (Delta, Gamma, Theta, Vega), "
                 "volume/open interest analysis, Put/Call ratio, and risk warnings. "
                 "Provides actionable insights for options trading strategies."
@@ -412,6 +414,8 @@ async def analyze_security(
     symbol: str,
     period: str = DEFAULT_PERIOD,
     use_ai: bool = False,
+    risk_profile: str = "neutral",
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Analyze a security with technical indicators and signals.
 
@@ -419,19 +423,49 @@ async def analyze_security(
         symbol: Ticker symbol.
         period: Time period for analysis.
         use_ai: Whether to use AI ranking.
+        risk_profile: Risk profile to use ("risky", "neutral", "averse").
+        config_overrides: Optional parameter overrides as dict.
 
     Returns:
-        Complete analysis result dictionary.
+        Complete analysis result dictionary with config info.
+
+    Example:
+        >>> result = await analyze_security(
+        ...     "AAPL",
+        ...     period="1d",
+        ...     use_ai=True,
+        ...     config_overrides={"rsi_oversold": 28}
+        ... )
+        >>> assert result["config_applied"]["rsi_oversold"] == 28
     """
     symbol = symbol.upper().strip()
     cache = get_result_cache()
+
+    # Get config with overrides applied
+    config_mgr = get_config_manager()
+    user_config = config_mgr.get_config(
+        risk_profile=risk_profile,
+        session_overrides=config_overrides,
+    )
+    ctx = get_config_context(user_config)
+
+    # Validate config
+    is_valid, errors = config_mgr.validate_overrides(user_config.custom_overrides)
+    if not is_valid:
+        logger.warning("Config validation errors: %s", errors)
 
     cached_result = cache.get(symbol, period)
     if cached_result:
         logger.info("Cache hit for %s", symbol)
         return cached_result
 
-    logger.info("Analyzing %s (period: %s, use_ai: %s)", symbol, period, use_ai)
+    logger.info(
+        "Analyzing %s (period: %s, use_ai: %s, profile: %s)",
+        symbol,
+        period,
+        use_ai,
+        risk_profile,
+    )
 
     fetcher = get_data_fetcher()
     df = fetcher.fetch(symbol, period)
@@ -464,12 +498,14 @@ async def analyze_security(
         else 0
     )
 
+    # Respect config's max_signals_returned
+    max_signals = ctx.max_signals_returned
     result = {
         "symbol": symbol,
         "timestamp": datetime.now().isoformat(),
         "price": market_data["price"],
         "change": market_data["change"],
-        "signals": [s.to_dict() for s in ranked_signals[:MAX_SIGNALS_RETURNED]],
+        "signals": [s.to_dict() for s in ranked_signals[:max_signals]],
         "summary": {
             "total_signals": len(ranked_signals),
             "bullish": bullish_count,
@@ -483,10 +519,23 @@ async def analyze_security(
             "volume": int(current["Volume"]),
         },
         "cached": False,
+        # Include config information for debugging/auditing
+        "config_applied": {
+            "risk_profile": risk_profile,
+            "custom_overrides": user_config.custom_overrides,
+            "rsi_oversold": ctx.rsi_oversold,
+            "rsi_overbought": ctx.rsi_overbought,
+            "max_signals_returned": ctx.max_signals_returned,
+        },
     }
 
     cache.set(symbol, period, result)
-    logger.info("Completed analysis for %s: %d signals", symbol, len(ranked_signals))
+    logger.info(
+        "Completed analysis for %s: %d signals (config: %s)",
+        symbol,
+        len(ranked_signals),
+        "applied" if user_config.custom_overrides else "default",
+    )
 
     return result
 
@@ -1266,10 +1315,10 @@ async def options_risk_analysis(
     option_type: str = "both",
     min_volume: int = 75,
 ) -> dict[str, Any]:
-    """Analyze options chain risk metrics for a security using real yfinance data.
+    """Analyze options chain risk metrics for a security using real market data.
 
     Comprehensive options risk analysis including:
-    - Real options chain data from yfinance
+    - Real options chain data from Finnhub/Alpha Vantage
     - IV (Implied Volatility) analysis
     - Greeks analysis (Delta, Gamma, Theta, Vega)
     - Volume and open interest analysis

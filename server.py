@@ -3,13 +3,17 @@
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
-import yfinance as yf
 from cachetools import TTLCache
 from datetime import datetime
 import pandas as pd
-from .analyzer import TechnicalAnalyzer
-from .ranking import rank_signals_local, rank_signals_ai
 import os
+import logging
+
+from .analyzer import TechnicalAnalyzer
+from .data import FinnhubAlphaDataFetcher, CachedDataFetcher
+from .ranking import rank_signals_local, rank_signals_ai
+
+logger = logging.getLogger(__name__)
 
 # In-memory cache (5 min TTL, max 100 symbols)
 cache = TTLCache(maxsize=100, ttl=300)
@@ -75,7 +79,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 async def analyze_security(symbol: str, period: str = "1mo", use_ai: bool = False):
     """
-    Analyze stock/ETF with free data (yfinance)
+    Analyze stock/ETF with real market data (Finnhub primary, Alpha Vantage fallback).
     """
     symbol = symbol.upper()
     cache_key = f"{symbol}:{period}"

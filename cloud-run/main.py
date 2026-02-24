@@ -6,6 +6,7 @@ Handles all API requests and routes to appropriate services
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -31,27 +32,44 @@ for path in ['/app/src', '/workspace/src', '../src', './src']:
         break
 
 # Try to import MCP server functions for direct analysis
+# Import each function individually so one missing function doesn't block all others
+MCP_AVAILABLE = False
+mcp_get_trade_plan = None
+mcp_scan_trades = None
+mcp_portfolio_risk = None
+mcp_morning_brief = None
+mcp_analyze_fibonacci = None
+mcp_options_risk_analysis = None
+mcp_analyze_security = None
+mcp_compare_securities = None
+
 try:
     from technical_analysis_mcp.server import (
         get_trade_plan as mcp_get_trade_plan,
         scan_trades as mcp_scan_trades,
         portfolio_risk as mcp_portfolio_risk,
         morning_brief as mcp_morning_brief,
-        analyze_fibonacci as mcp_analyze_fibonacci,
-        options_risk_analysis as mcp_options_risk_analysis,
+        analyze_security as mcp_analyze_security,
+        compare_securities as mcp_compare_securities,
     )
     MCP_AVAILABLE = True
-    logger.info("✅ MCP server functions imported successfully")
+    logger.info("✅ Core MCP server functions imported (7 tools)")
 except ImportError as e:
-    logger.warning(f"⚠️ MCP server functions not available: {e}")
+    logger.warning(f"⚠️ Core MCP server functions not available: {e}")
     logger.error("❌ MCP server required - no mock data allowed")
-    MCP_AVAILABLE = False
-    mcp_get_trade_plan = None
-    mcp_scan_trades = None
-    mcp_portfolio_risk = None
-    mcp_morning_brief = None
-    mcp_analyze_fibonacci = None
-    mcp_options_risk_analysis = None
+
+# Import optional tools separately (may not exist in all deployments)
+try:
+    from technical_analysis_mcp.server import analyze_fibonacci as mcp_analyze_fibonacci
+    logger.info("✅ analyze_fibonacci imported")
+except ImportError:
+    logger.info("ℹ️ analyze_fibonacci not available in this deployment")
+
+try:
+    from technical_analysis_mcp.server import options_risk_analysis as mcp_options_risk_analysis
+    logger.info("✅ options_risk_analysis imported")
+except ImportError:
+    logger.info("ℹ️ options_risk_analysis not available in this deployment")
 
 # Initialize GCP clients (optional for local testing)
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "ttb-lang1")
@@ -495,6 +513,56 @@ async def morning_brief_endpoint(request: MorningBriefRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class CompareSecuritiesRequest(BaseModel):
+    symbols: List[str] = Field(..., min_length=2, max_length=10)
+    metric: str = Field("signals", description="Comparison metric")
+    period: str = Field("3mo", description="Time period")
+
+class AnalyzeSecurityRequest(BaseModel):
+    symbol: str = Field(..., description="Ticker symbol")
+    period: str = Field("3mo", description="Time period")
+
+@app.post("/api/compare-securities")
+async def compare_securities_endpoint(request: CompareSecuritiesRequest):
+    """Compare multiple securities using direct MCP analysis (real-time)"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        result = await mcp_compare_securities(
+            symbols=request.symbols,
+            metric=request.metric,
+            period=request.period,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Compare securities error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/analyze-security")
+async def analyze_security_endpoint(request: AnalyzeSecurityRequest):
+    """Analyze a single security using direct MCP analysis (real-time)"""
+    if not MCP_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP server functions not available"
+        )
+
+    try:
+        result = await mcp_analyze_security(
+            symbol=request.symbol,
+            period=request.period,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Analyze security error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/fibonacci")
 async def fibonacci_analysis(request: FibonacciRequest):
     """Comprehensive Fibonacci analysis with levels, signals, and clusters.
@@ -502,10 +570,10 @@ async def fibonacci_analysis(request: FibonacciRequest):
     Returns 40+ Fibonacci levels, 200+ signals across categories,
     confluence zones, and multi-timeframe validation.
     """
-    if not MCP_AVAILABLE:
+    if not mcp_analyze_fibonacci:
         raise HTTPException(
             status_code=503,
-            detail="MCP server functions not available"
+            detail="analyze_fibonacci not available in this deployment"
         )
 
     try:
@@ -525,10 +593,10 @@ async def fibonacci_analysis(request: FibonacciRequest):
 @app.post("/api/options-risk")
 async def options_risk_analysis_endpoint(request: OptionsRiskRequest):
     """Analyze options risk for a security (puts/calls, PCR, IV, OI)"""
-    if not MCP_AVAILABLE:
+    if not mcp_options_risk_analysis:
         raise HTTPException(
             status_code=503,
-            detail="MCP server functions not available"
+            detail="options_risk_analysis not available in this deployment"
         )
 
     try:
@@ -670,20 +738,19 @@ async def clear_cache(collection: str = Query("signals")):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     """Handle HTTP exceptions"""
-    return {
-        "error": exc.detail,
-        "status_code": exc.status_code
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "status_code": exc.status_code},
+    )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     """Handle general exceptions"""
     logger.error(f"Unhandled exception: {exc}")
-    return {
-        "error": "Internal server error",
-        "detail": str(exc),
-        "status_code": 500
-    }
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc), "status_code": 500},
+    )
 
 # ============================================================================
 # STARTUP/SHUTDOWN
