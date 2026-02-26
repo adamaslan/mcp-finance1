@@ -15,7 +15,7 @@ from mcp.types import TextContent, Tool
 
 from .config import DEFAULT_PERIOD, MAX_SIGNALS_RETURNED, MAX_SYMBOLS_COMPARE
 from .config_adapter import ConfigContext, get_config_context
-from .data import AnalysisResultCache, CachedDataFetcher, DataFetcher
+from .data import AnalysisResultCache, DataFetcher, create_data_fetcher
 from .exceptions import DataFetchError, TechnicalAnalysisError
 from .briefing import MorningBriefGenerator
 from .formatting import format_analysis, format_comparison, format_screening, format_risk_analysis, format_scan_results, format_portfolio_risk, format_morning_brief
@@ -40,7 +40,7 @@ def get_data_fetcher() -> DataFetcher:
     """Get or create the data fetcher instance."""
     global _data_fetcher
     if _data_fetcher is None:
-        _data_fetcher = CachedDataFetcher()
+        _data_fetcher = create_data_fetcher(use_cache=True)
     return _data_fetcher
 
 

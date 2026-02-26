@@ -4,7 +4,8 @@ import asyncio
 import logging
 from typing import Any
 
-from ..data import CachedDataFetcher
+from ..config import DEFAULT_PERIOD
+from ..data import create_data_fetcher
 from ..indicators import calculate_all_indicators
 from ..ranking import rank_signals
 from ..risk import RiskAssessor
@@ -20,7 +21,7 @@ class MorningBriefGenerator:
 
     def __init__(self):
         """Initialize briefing generator."""
-        self._fetcher = CachedDataFetcher()
+        self._fetcher = create_data_fetcher(use_cache=True)
         self._risk_assessor = RiskAssessor()
         self._market_checker = MarketStatusChecker()
         self._calendar = EconomicCalendar()
@@ -29,7 +30,7 @@ class MorningBriefGenerator:
         self,
         watchlist: list[str] | None = None,
         market_region: str = "US",
-        period: str = "1mo",
+        period: str = DEFAULT_PERIOD,
     ) -> dict[str, Any]:
         """Generate morning market briefing.
 
@@ -75,7 +76,7 @@ class MorningBriefGenerator:
             "key_themes": market_themes,
         }
 
-    async def _analyze_watchlist(self, symbols: list[str], period: str = "1mo") -> list[dict[str, Any]]:
+    async def _analyze_watchlist(self, symbols: list[str], period: str = DEFAULT_PERIOD) -> list[dict[str, Any]]:
         """Analyze watchlist symbols for signals.
 
         Args:
@@ -107,7 +108,7 @@ class MorningBriefGenerator:
 
         return results
 
-    async def _analyze_single(self, symbol: str, period: str = "1mo") -> dict[str, Any]:
+    async def _analyze_single(self, symbol: str, period: str = DEFAULT_PERIOD) -> dict[str, Any]:
         """Analyze single symbol for watchlist.
 
         Args:

@@ -6,7 +6,8 @@ import time
 from datetime import datetime
 from typing import Any
 
-from ..data import CachedDataFetcher
+from ..config import DEFAULT_PERIOD
+from ..data import create_data_fetcher
 from ..indicators import calculate_all_indicators
 from ..ranking import rank_signals
 from ..risk import RiskAssessor
@@ -26,14 +27,14 @@ class TradeScanner:
             max_concurrent: Maximum concurrent scan operations.
         """
         self._max_concurrent = max_concurrent
-        self._fetcher = CachedDataFetcher()
+        self._fetcher = create_data_fetcher(use_cache=True)
         self._risk_assessor = RiskAssessor()
 
     async def scan_universe(
         self,
         universe: str = "sp500",
         max_results: int = 10,
-        period: str = "1mo",
+        period: str = DEFAULT_PERIOD,
     ) -> dict[str, Any]:
         """Scan universe for qualified trade setups.
 
