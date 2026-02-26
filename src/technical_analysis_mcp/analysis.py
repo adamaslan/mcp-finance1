@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from .config import DEFAULT_PERIOD
-from .data import CachedDataFetcher, YFinanceDataFetcher
+from .data import create_data_fetcher
 from .exceptions import DataFetchError, InsufficientDataError, InvalidSymbolError
 from .indicators import (
     calculate_bollinger_bands,
@@ -50,7 +50,7 @@ class StockAnalyzer:
             use_cache: Whether to cache fetched data.
             use_ai: Whether to use AI-powered ranking (falls back to rule-based if unavailable).
         """
-        self._data_fetcher = CachedDataFetcher() if use_cache else YFinanceDataFetcher()
+        self._data_fetcher = create_data_fetcher(use_cache=use_cache)
         self._use_ai = use_ai
         self._rule_based_ranker = RuleBasedRanking()
         self._ai_ranker = GeminiRanking() if use_ai else None

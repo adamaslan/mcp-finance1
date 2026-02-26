@@ -6,7 +6,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
-from ..data import CachedDataFetcher
+from ..config import DEFAULT_PERIOD
+from ..data import create_data_fetcher
 from ..indicators import calculate_all_indicators
 from ..ranking import rank_signals
 from ..risk import RiskAssessor
@@ -21,13 +22,13 @@ class PortfolioRiskAssessor:
 
     def __init__(self):
         """Initialize portfolio risk assessor."""
-        self._fetcher = CachedDataFetcher()
+        self._fetcher = create_data_fetcher(use_cache=True)
         self._risk_assessor = RiskAssessor()
 
     async def assess_positions(
         self,
         positions: list[dict[str, Any]],
-        period: str = "1mo",
+        period: str = DEFAULT_PERIOD,
     ) -> dict[str, Any]:
         """Assess aggregate risk across positions.
 
@@ -115,7 +116,7 @@ class PortfolioRiskAssessor:
             "timestamp": datetime.now().isoformat(),
         }
 
-    async def _assess_single_position(self, position: dict[str, Any], period: str = "1mo") -> dict[str, Any]:
+    async def _assess_single_position(self, position: dict[str, Any], period: str = DEFAULT_PERIOD) -> dict[str, Any]:
         """Assess risk for a single position.
 
         Args:

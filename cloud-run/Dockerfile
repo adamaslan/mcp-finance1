@@ -1,8 +1,8 @@
 # Stage 1: Build - Install dependencies using micromamba
 FROM mambaorg/micromamba:1.5.6 as builder
 
-# Copy environment file with correct ownership
-COPY --chown=$MAMBA_USER:$MAMBA_USER environment.yml /tmp/environment.yml
+# Copy environment file with correct ownership (from cloud-run/)
+COPY --chown=$MAMBA_USER:$MAMBA_USER cloud-run/environment.yml /tmp/environment.yml
 
 # Create environment in base (faster than creating new named environment)
 RUN micromamba install -y -n base -f /tmp/environment.yml && \
@@ -19,8 +19,14 @@ WORKDIR /app
 
 # Copy application code with correct ownership
 # CRITICAL: --chown ensures non-root ownership
-COPY --chown=$MAMBA_USER:$MAMBA_USER *.py ./
+
+# Copy FastAPI wrapper (cloud-run specific)
+COPY --chown=$MAMBA_USER:$MAMBA_USER cloud-run/main.py ./main.py
+
+# Copy the SINGLE SOURCE OF TRUTH package (src/ is canonical)
 COPY --chown=$MAMBA_USER:$MAMBA_USER src ./src
+
+# Copy fibonacci (moved to project root)
 COPY --chown=$MAMBA_USER:$MAMBA_USER fibonacci ./fibonacci
 
 # Environment configuration

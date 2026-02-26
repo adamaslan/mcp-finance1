@@ -31,6 +31,11 @@ for path in ['/app/src', '/workspace/src', '../src', './src']:
         logger.info(f"Added {path} to Python path")
         break
 
+# Ensure fibonacci package is importable (lives at /app/fibonacci/)
+if '/app' not in sys.path:
+    sys.path.insert(0, '/app')
+    logger.info("Added /app to Python path for fibonacci package")
+
 # Try to import MCP server functions for direct analysis
 # Import each function individually so one missing function doesn't block all others
 MCP_AVAILABLE = False

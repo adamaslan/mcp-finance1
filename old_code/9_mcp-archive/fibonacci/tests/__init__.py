@@ -1,0 +1,1 @@
+"""Fibonacci analysis test suite."""

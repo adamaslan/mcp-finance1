@@ -144,3 +144,84 @@ security_scan_results_unreviewed/
 *.Rhistory
 *.RData
 *.Rproj.user
+
+# Additional Security: Sensitive Documentation
+# (API key rotation reminders, credential audit files, etc.)
+*CREDENTIAL*.md
+*CREDENTIAL*.txt
+*SECRET*.md
+*SECRET*.txt
+*API_KEY*.md
+*ROTATION*.md
+*REMEDIATION*.md
+docs/*SECURITY*.md
+docs/*CREDENTIAL*.md
+docs/*SECRET*.md
+
+# Sensitive data in test results/reports
+*_UNREVIEWED.*
+*_raw_*
+*_with_data.*
+*_real_data.*
+test_*_UNSAFE*
+*_UNSAFE*
+
+# Additional GCP and Cloud patterns
+google-cloud-key*
+gcp-key*
+*-service-account.json
+*-private-key.pem
+cloud_config.yml
+cloud_config.yaml
+
+# AWS patterns (if used)
+aws_credentials*
+aws_config*
+~/.aws/
+
+# Database backups with real data
+*.sql
+*.sql.gz
+*.pgdump
+*.mongodb
+*.sqlite-backup
+
+# API response logs
+api_logs/
+api_responses_raw/
+*_api_response.json
+*_api_responses.json
+
+# Audit and compliance files
+audit_*.log
+security_audit_*.json
+compliance_*.json
+
+# Configuration with secrets
+*production*.yml
+*production*.yaml
+*production*.conf
+*production*.config
+local.settings.json
+settings.local.json
+
+# Chat/conversation exports with sensitive context
+*_export.json
+*_export.txt
+conversation_*.md
+debug_*.log
+
+# Backup directories
+.backup/
+backups/
+backup_*/
+.backups/
+
+# Cache directories that might have sensitive data
+.cache/
+cache/
+*_cache/
+
+# Version control local config
+.git/config.local
+.gitconfig.local
