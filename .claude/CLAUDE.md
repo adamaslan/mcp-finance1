@@ -59,6 +59,97 @@ Key principles:
 
 ---
 
+## 🔐 Secret Scanning for Commits & PRs
+
+### CRITICAL RULE: Automatic Secret Prevention
+
+**All commits are automatically scanned for secrets before allowing them to be created.** This is enforced via git pre-commit hooks and MUST NOT be bypassed.
+
+### What Gets Blocked
+
+The pre-commit hook will **BLOCK** commits if it detects:
+
+- ❌ **GCP API Keys** - `AIzaSy*` pattern
+- ❌ **GCP OAuth Secrets** - `GOCSPX-*` pattern
+- ❌ **GCP Access Tokens** - `ya29.*` pattern
+- ❌ **GCP Refresh Tokens** - `1//*` pattern
+- ❌ **Service Account JSON files** - files containing service_account type with private_key fields
+- ❌ **Stripe API Keys** - `sk_live_*`, `rk_live_*`, `pk_live_*`
+- ❌ **Database connection strings** - `postgresql://`, `mysql://` with credentials
+- ❌ **AWS Credentials** - AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID
+- ❌ **Password assignments** - `password=`, `secret=`, `api_key=`
+
+### Before Creating PRs
+
+1. **Never commit actual secrets** - Use .env files (gitignored) instead
+2. **Use placeholder values** - Example: `API_KEY=your-api-key-here`
+3. **Check .gitignore** - Ensure sensitive files are properly ignored
+4. **Scan manually if needed** - See "If hook needs to be bypassed" below
+
+### If Pre-commit Hook Blocks Your Commit
+
+**This is expected behavior!** Do NOT use `--no-verify` without investigation:
+
+```bash
+# 1. Check what triggered the block
+git diff --cached
+
+# 2. Remove the secret from the file
+# Edit the file to use a placeholder value
+
+# 3. Stage the fix
+git add <file>
+
+# 4. Try committing again
+git commit -m "your message"
+```
+
+### If You MUST Override (Emergency Only)
+
+```bash
+# Only use if you've verified no real secrets are in the commit
+git commit --no-verify -m "your message"
+
+# Then IMMEDIATELY:
+git log --oneline | head -1  # Get commit hash
+git reset --soft HEAD~1      # Undo commit
+# Fix the issue
+git commit -m "corrected message"
+```
+
+### For PR Reviewers
+
+When reviewing PRs, verify:
+- ✅ No .env files are included
+- ✅ No real API keys in code examples
+- ✅ Database passwords are redacted
+- ✅ GCP credentials paths use relative references (e.g., `~/.gcloud-credentials/`)
+- ✅ All examples use placeholder values
+
+### Sensitive Data Patterns in .gitignore
+
+The following are automatically ignored (even if accidentally staged):
+```
+.env*              # All environment files
+*.key              # Key files
+*.pem              # PEM certificates
+*secret*           # Secret files
+*credentials*      # Credential files
+*password*         # Password files
+```
+
+### Security Checklist Before Committing
+
+- [ ] Reviewed all `git diff --cached` output
+- [ ] No real API keys in staged files
+- [ ] No database passwords visible
+- [ ] No GCP/AWS credentials
+- [ ] All placeholders use example values
+- [ ] .env files are in .gitignore
+- [ ] Documentation uses generic examples
+
+---
+
 ## MCP Tools Reference
 
 All 9 MCP tools now support configurable periods:

@@ -225,3 +225,8 @@ cache/
 # Version control local config
 .git/config.local
 .gitconfig.local
+
+# Sensitive documentation and rules
+# (Contains examples of secret patterns and sensitive data formats)
+.claude/rules/SECRET_SCANNING_*.md
+.claude/rules/gcp-key-management.md
