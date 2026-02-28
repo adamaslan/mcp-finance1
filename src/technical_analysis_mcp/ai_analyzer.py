@@ -11,6 +11,8 @@ import logging
 from typing import Any
 from datetime import datetime
 
+from .config import GEMINI_MODEL
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 class MCPToolAIAnalyzer:
     """Use Gemini to analyze and explain MCP tool outputs with natural language insights."""
 
-    MODEL_NAME = "gemini-2.0-flash"
+    MODEL_NAME = GEMINI_MODEL
 
     def __init__(self, api_key: str | None = None):
         """Initialize Gemini AI analyzer.
