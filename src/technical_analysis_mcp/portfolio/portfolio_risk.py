@@ -12,9 +12,16 @@ from ..indicators import calculate_all_indicators
 from ..ranking import rank_signals
 from ..risk import RiskAssessor
 from ..signals import detect_all_signals
-from .sector_mapping import get_sector
+from .sector_mapping import get_sector, get_risk_level
 
 logger = logging.getLogger(__name__)
+
+# Stop loss percentages based on financial risk assessment
+STOP_LOSS_RANGES = {
+    "low": (2.0, 3.0),          # Blue-chip, stable companies
+    "moderate": (3.0, 5.0),     # Established with some volatility
+    "high": (5.0, 8.0),         # Growth, volatile, emerging
+}
 
 
 class PortfolioRiskAssessor:
@@ -24,6 +31,55 @@ class PortfolioRiskAssessor:
         """Initialize portfolio risk assessor."""
         self._fetcher = create_data_fetcher(use_cache=True)
         self._risk_assessor = RiskAssessor()
+
+    def _calculate_intelligent_stop(
+        self, current_price: float, symbol: str, df: Any
+    ) -> float:
+        """Calculate intelligent stop loss based on financial risk assessment.
+
+        Uses a smart approach:
+        1. Get stock's risk level (blue-chip, established, growth)
+        2. Calculate volatility from historical data
+        3. Adjust stop based on sector and stock characteristics
+        4. Range: 2-8% depending on risk
+
+        Args:
+            current_price: Current stock price.
+            symbol: Stock ticker.
+            df: Historical price dataframe.
+
+        Returns:
+            Stop loss price (below current price).
+        """
+        risk_level = get_risk_level(symbol)
+        min_pct, max_pct = STOP_LOSS_RANGES[risk_level]
+
+        # Calculate historical volatility (daily returns standard deviation)
+        try:
+            df_copy = df.copy()
+            if "Close" in df_copy.columns:
+                returns = df_copy["Close"].pct_change()
+                volatility = returns.std() * 100  # Convert to percentage
+
+                # Adjust stop based on volatility
+                # Higher volatility = wider stop within the range
+                if volatility > 0:
+                    # Normalize volatility to 0-1 scale (2% daily vol = ~0.5)
+                    vol_factor = min(volatility / 4.0, 1.0)
+                    adjusted_stop_pct = min_pct + (max_pct - min_pct) * vol_factor
+                else:
+                    adjusted_stop_pct = min_pct
+            else:
+                adjusted_stop_pct = (min_pct + max_pct) / 2
+        except Exception:
+            # Fallback to middle of range if volatility calculation fails
+            adjusted_stop_pct = (min_pct + max_pct) / 2
+
+        # Cap at the min/max range
+        adjusted_stop_pct = max(min_pct, min(adjusted_stop_pct, max_pct))
+
+        stop_price = current_price * (1 - adjusted_stop_pct / 100)
+        return stop_price
 
     async def assess_positions(
         self,
@@ -90,9 +146,17 @@ class PortfolioRiskAssessor:
         total_value = sum(p["current_value"] for p in position_risks)
         total_max_loss = sum(p["max_loss_dollar"] for p in position_risks)
 
-        # Sector concentration
+        # Organize positions by sector
+        positions_by_sector = self._organize_by_sectors(position_risks)
+
+        # Sector concentration and summaries
         sector_concentration = self._calculate_sector_concentration(
             position_risks, total_value
+        )
+
+        # Generate sector summaries with risk breakdown
+        sector_summaries = self._generate_sector_summaries(
+            positions_by_sector, sector_concentration
         )
 
         # Hedge suggestions
@@ -108,12 +172,13 @@ class PortfolioRiskAssessor:
             "total_value": total_value,
             "total_max_loss": total_max_loss,
             "risk_percent_of_portfolio": risk_percent,
-            "positions": position_risks,
-            "sector_concentration": sector_concentration,
-            "correlation_matrix": None,  # Simplified: skip correlation for now
             "overall_risk_level": overall_risk_level,
-            "hedge_suggestions": hedge_suggestions,
             "timestamp": datetime.now().isoformat(),
+            # Organized by 11 sectors
+            "sectors": sector_summaries,
+            "sector_concentration": sector_concentration,
+            "all_positions": position_risks,  # Flat list for backward compatibility
+            "hedge_suggestions": hedge_suggestions,
         }
 
     async def _assess_single_position(self, position: dict[str, Any], period: str = DEFAULT_PERIOD) -> dict[str, Any]:
@@ -124,7 +189,7 @@ class PortfolioRiskAssessor:
             period: Time period for analysis.
 
         Returns:
-            Position risk assessment.
+            Position risk assessment with intelligent stop losses.
         """
         symbol = position.get("symbol", "").upper()
         shares = position.get("shares", 0)
@@ -137,7 +202,10 @@ class PortfolioRiskAssessor:
         current = df.iloc[-1]
         current_price = float(current.get("Close", entry_price))
 
-        # Get risk assessment
+        # Calculate intelligent stop loss based on financial risk
+        stop_price = self._calculate_intelligent_stop(current_price, symbol, df)
+
+        # Get risk assessment for additional signals
         signals = detect_all_signals(df)
         market_data = {"price": current_price, "change": 0}
         ranked_signals = rank_signals(
@@ -148,36 +216,129 @@ class PortfolioRiskAssessor:
         )
         risk_result = self._risk_assessor.assess(df, ranked_signals, symbol)
 
-        # Extract stop level from risk assessment
-        if risk_result.risk_assessment and risk_result.risk_assessment.stop:
-            stop_price = float(risk_result.risk_assessment.stop.price)
-        else:
-            stop_price = entry_price * 0.95  # Default 5% stop
-
-        # Calculate position metrics
+        # Use current price as the entry price (current snapshot)
         current_value = current_price * shares
-        entry_value = entry_price * shares
-        unrealized_pnl = current_value - entry_value
-        unrealized_percent = (unrealized_pnl / entry_value * 100) if entry_value > 0 else 0
+        entry_value = current_price * shares  # Use current as base
+        unrealized_pnl = 0  # No PnL since entry = current
+        unrealized_percent = 0
 
         max_loss_dollar = abs(current_price - stop_price) * shares
         max_loss_percent = (abs(current_price - stop_price) / current_price * 100) if current_price > 0 else 0
 
+        risk_level = get_risk_level(symbol)
+
         return {
             "symbol": symbol,
             "shares": shares,
-            "entry_price": entry_price,
+            "entry_price": current_price,  # Current price is the entry
             "current_price": current_price,
             "current_value": current_value,
             "unrealized_pnl": unrealized_pnl,
             "unrealized_percent": unrealized_percent,
             "stop_level": stop_price,
+            "stop_loss_percent": max_loss_percent,
             "max_loss_dollar": max_loss_dollar,
             "max_loss_percent": max_loss_percent,
+            "risk_level": risk_level,  # low, moderate, high
             "risk_quality": risk_result.risk_assessment.risk_quality.value if risk_result.risk_assessment else "low",
             "timeframe": risk_result.trade_plans[0].timeframe.value if risk_result.trade_plans else "swing",
             "sector": get_sector(symbol),
         }
+
+    def _organize_by_sectors(
+        self, positions: list[dict[str, Any]]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Organize positions by their sectors.
+
+        Args:
+            positions: List of position assessments.
+
+        Returns:
+            Dictionary mapping sector names to lists of positions.
+        """
+        sectors_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+        for pos in positions:
+            sector = pos.get("sector", "Other")
+            sectors_map[sector].append(pos)
+
+        # Sort sectors in a logical order
+        sector_order = [
+            "Information Technology",
+            "Healthcare",
+            "Financials",
+            "Energy",
+            "Consumer Discretionary",
+            "Consumer Staples",
+            "Industrials",
+            "Materials",
+            "Communication Services",
+            "Utilities",
+            "Real Estate",
+            "Other",
+        ]
+
+        # Return sorted dictionary
+        return {
+            sector: sectors_map[sector]
+            for sector in sector_order
+            if sector in sectors_map
+        }
+
+    def _generate_sector_summaries(
+        self,
+        positions_by_sector: dict[str, list[dict[str, Any]]],
+        sector_concentration: dict[str, float],
+    ) -> dict[str, dict[str, Any]]:
+        """Generate comprehensive summaries for each sector.
+
+        Args:
+            positions_by_sector: Positions organized by sector.
+            sector_concentration: Sector concentration percentages.
+
+        Returns:
+            Dictionary of sector summaries with aggregated metrics.
+        """
+        sector_summaries = {}
+
+        for sector, positions in positions_by_sector.items():
+            total_value = sum(p["current_value"] for p in positions)
+            total_max_loss = sum(p["max_loss_dollar"] for p in positions)
+            avg_stop_loss_pct = sum(p["stop_loss_percent"] for p in positions) / len(
+                positions
+            )
+
+            # Count risk levels
+            low_risk_count = sum(1 for p in positions if p["risk_level"] == "low")
+            moderate_risk_count = sum(
+                1 for p in positions if p["risk_level"] == "moderate"
+            )
+            high_risk_count = sum(1 for p in positions if p["risk_level"] == "high")
+
+            # Get hedge ETF for this sector
+            hedge_etf = self._get_sector_hedge_etf(sector)
+
+            sector_summaries[sector] = {
+                "total_value": total_value,
+                "percent_of_portfolio": sector_concentration.get(sector, 0),
+                "position_count": len(positions),
+                "positions": positions,
+                "metrics": {
+                    "total_max_loss_dollar": total_max_loss,
+                    "max_loss_percent_of_sector": (
+                        (total_max_loss / total_value * 100) if total_value > 0 else 0
+                    ),
+                    "avg_stop_loss_percent": avg_stop_loss_pct,
+                },
+                "risk_distribution": {
+                    "low_risk_count": low_risk_count,
+                    "moderate_risk_count": moderate_risk_count,
+                    "high_risk_count": high_risk_count,
+                },
+                "hedge_etf": hedge_etf,
+            }
+
+        return sector_summaries
 
     def _calculate_sector_concentration(
         self,
