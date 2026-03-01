@@ -6,6 +6,7 @@ to the appropriate service functions using dependency injection.
 
 import asyncio
 import logging
+import json
 import numpy as np
 from datetime import datetime
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
+from .cache import MCPFirestoreCache
 from .config import DEFAULT_PERIOD, MAX_SIGNALS_RETURNED, MAX_SYMBOLS_COMPARE
 from .config_adapter import ConfigContext, get_config_context
 from .data import AnalysisResultCache, DataFetcher, create_data_fetcher
@@ -34,6 +36,8 @@ app = Server("technical-analysis-mcp")
 
 _data_fetcher: DataFetcher | None = None
 _result_cache: AnalysisResultCache | None = None
+_firestore_cache: MCPFirestoreCache | None = None
+_background_tasks: set = set()  # prevents GC of fire-and-forget tasks
 
 
 def get_data_fetcher() -> DataFetcher:
@@ -50,6 +54,28 @@ def get_result_cache() -> AnalysisResultCache:
     if _result_cache is None:
         _result_cache = AnalysisResultCache()
     return _result_cache
+
+
+def get_firestore_cache() -> MCPFirestoreCache | None:
+    """Get or create the Firestore cache instance.
+
+    Returns None if Firestore is unavailable (non-fatal).
+    """
+    global _firestore_cache
+    if _firestore_cache is None:
+        try:
+            _firestore_cache = MCPFirestoreCache()
+        except Exception as e:
+            logger.warning("Firestore cache unavailable: %s", e)
+            _firestore_cache = False  # mark as attempted but failed
+    return _firestore_cache if _firestore_cache is not False else None
+
+
+def _run_background(coro: Any) -> None:
+    """Schedule a fire-and-forget async task (prevents GC)."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 def calculate_adaptive_tolerance(level_prices: list[float]) -> float:
@@ -358,46 +384,219 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+async def _populate_all_tools_for_tickers(tickers: list[str], period: str) -> None:
+    """Background: run all 9 tools for portfolio tickers and write to Firestore.
+
+    Called after portfolio_risk() to seed the Firestore cache with all tool results
+    for the portfolio tickers.
+
+    Args:
+        tickers: List of stock symbols (uppercase)
+        period: Time period for analysis
+    """
+    cache = get_firestore_cache()
+    if not cache:
+        logger.warning("Background population skipped: Firestore cache unavailable")
+        return
+
+    cache.write_portfolio_tickers(tickers)
+    logger.info("Starting background population for %d tickers", len(tickers))
+
+    semaphore = asyncio.Semaphore(3)  # limit concurrency to 3
+
+    async def _run_tool(tool_name: str, coro_fn: Any, key: str, **kwargs: Any) -> None:
+        async with semaphore:
+            try:
+                result = await coro_fn(**kwargs)
+                cache.write_tool_result(tool_name, key, result, period)
+                logger.debug("Cached %s/%s", tool_name, key)
+            except Exception as e:
+                logger.debug("Background cache %s/%s failed: %s", tool_name, key, e)
+
+    tasks: list[Any] = []
+
+    # Per-symbol tools
+    for sym in tickers:
+        tasks.append(
+            _run_tool(
+                "analyze_security", analyze_security, sym, symbol=sym, period=period
+            )
+        )
+        tasks.append(
+            _run_tool("get_trade_plan", get_trade_plan, sym, symbol=sym, period=period)
+        )
+        tasks.append(
+            _run_tool(
+                "analyze_fibonacci", analyze_fibonacci, sym, symbol=sym, period=period
+            )
+        )
+        tasks.append(
+            _run_tool("options_risk_analysis", options_risk_analysis, sym, symbol=sym)
+        )
+
+    # Multi-symbol / universe tools
+    symbols_key = "_".join(sorted(tickers))
+    tasks.append(
+        _run_tool(
+            "compare_securities",
+            compare_securities,
+            symbols_key,
+            symbols=tickers,
+            period=period,
+        )
+    )
+    tasks.append(
+        _run_tool(
+            "morning_brief",
+            morning_brief,
+            symbols_key,
+            watchlist=tickers,
+            period=period,
+        )
+    )
+    tasks.append(
+        _run_tool("scan_trades", scan_trades, "sp500", universe="sp500", period=period)
+    )
+    tasks.append(
+        _run_tool(
+            "screen_securities",
+            screen_securities,
+            "sp500",
+            universe="sp500",
+            period=period,
+        )
+    )
+
+    await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info("Background Firestore cache population complete for %d tickers", len(tickers))
+
+
+async def _async_cache_write(
+    cache: MCPFirestoreCache,
+    tool_name: str,
+    cache_key: str,
+    result: dict[str, Any],
+    period: str | None = None,
+) -> None:
+    """Async wrapper for Firestore cache write (non-blocking)."""
+    try:
+        cache.write_tool_result(tool_name, cache_key, result, period)
+    except Exception as e:
+        logger.debug("Cache write failed for %s/%s: %s", tool_name, cache_key, e)
+
+
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Route tool calls to appropriate handlers."""
     try:
         if name == "analyze_security":
             result = await analyze_security(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "analyze_security", arguments["symbol"].upper(),
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_analysis(result))]
 
         if name == "compare_securities":
             result = await compare_securities(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                symbols_key = "_".join(sorted(arguments.get("symbols", [])))
+                _run_background(_async_cache_write(
+                    cache, "compare_securities", symbols_key,
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_comparison(result))]
 
         if name == "screen_securities":
             result = await screen_securities(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "screen_securities", arguments.get("universe", "sp500"),
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_screening(result))]
 
         if name == "get_trade_plan":
             result = await get_trade_plan(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "get_trade_plan", arguments["symbol"].upper(),
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_risk_analysis(result))]
 
         if name == "scan_trades":
             result = await scan_trades(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "scan_trades", arguments.get("universe", "sp500"),
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_scan_results(result))]
 
         if name == "portfolio_risk":
             result = await portfolio_risk(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            positions = arguments.get("positions", [])
+            if cache and positions:
+                tickers = [p["symbol"].upper() for p in positions if p.get("symbol")]
+                positions_key = "_".join(sorted(tickers))
+                _run_background(_async_cache_write(
+                    cache, "portfolio_risk", positions_key,
+                    result, arguments.get("period")
+                ))
+                # Trigger background population of all tools for these tickers
+                if tickers:
+                    _run_background(_populate_all_tools_for_tickers(
+                        tickers, arguments.get("period", DEFAULT_PERIOD)
+                    ))
             return [TextContent(type="text", text=format_portfolio_risk(result))]
 
         if name == "morning_brief":
             result = await morning_brief(**arguments)
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                watchlist = arguments.get("watchlist", [])
+                watchlist_key = "_".join(sorted(watchlist)) if watchlist else "default"
+                _run_background(_async_cache_write(
+                    cache, "morning_brief", watchlist_key,
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=format_morning_brief(result))]
 
         if name == "analyze_fibonacci":
             result = await analyze_fibonacci(**arguments)
-            import json
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "analyze_fibonacci", arguments["symbol"].upper(),
+                    result, arguments.get("period")
+                ))
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         if name == "options_risk_analysis":
             result = await options_risk_analysis(**arguments)
-            import json
+            # Write to Firestore cache (non-blocking)
+            cache = get_firestore_cache()
+            if cache:
+                _run_background(_async_cache_write(
+                    cache, "options_risk_analysis", arguments["symbol"].upper(),
+                    result
+                ))
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
