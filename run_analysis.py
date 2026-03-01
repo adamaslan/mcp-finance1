@@ -89,12 +89,13 @@ def test_gemini_connection():
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        from src.technical_analysis_mcp.config import GEMINI_MODEL
+        model = genai.GenerativeModel(GEMINI_MODEL)
         response = model.generate_content("Reply with only: OK")
 
         if response and response.text:
             print(f"✓ Gemini API connection successful!")
-            print(f"  Model: gemini-2.0-flash-exp")
+            print(f"  Model: {GEMINI_MODEL}")
             print(f"  Response: {response.text.strip()[:50]}")
             print()
             return True

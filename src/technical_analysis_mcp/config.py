@@ -42,7 +42,7 @@ MIN_DATA_POINTS_200MA: Final[int] = 200
 
 # API Configuration
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL: Final[str] = "gemini-2.0-flash-exp"
+GEMINI_MODEL: Final[str] = "gemini-2.0-flash"
 
 # Analysis Limits - SWING TRADING OPTIMIZATION
 # Reduce signal count to prevent analysis paralysis (was 50)
