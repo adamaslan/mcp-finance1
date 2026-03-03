@@ -1,14 +1,20 @@
 """Firebase Firestore cache layer for industry performance data.
 
 Stores and retrieves industry performance cache with atomic operations.
+Implements L1 in-memory cache and non-blocking async writes.
 """
 
+import asyncio
 import logging
+import time
 from typing import Optional
 from datetime import datetime
 import os
 
 logger = logging.getLogger(__name__)
+
+# L1 in-memory cache TTL (10 minutes)
+_L1_TTL_SECONDS = 600
 
 
 class FirebaseCacheError(Exception):
@@ -30,6 +36,9 @@ class FirebaseCache:
         Raises:
             FirebaseCacheError: If Firebase initialization fails.
         """
+        # L1 in-memory cache: {industry: (data, expire_at)}
+        self._l1: dict[str, tuple[dict, float]] = {}
+
         try:
             import firebase_admin
             from firebase_admin import credentials, firestore
@@ -77,6 +86,9 @@ class FirebaseCache:
             FirebaseCacheError: If write fails.
         """
         try:
+            # Update L1 in-memory cache immediately
+            self._l1[industry] = (performance_data, time.monotonic() + _L1_TTL_SECONDS)
+
             doc_ref = self._db.collection(self.COLLECTION_NAME).document(industry)
             doc_ref.set(performance_data)
             logger.info("Cached performance data for %s", industry)
@@ -86,8 +98,80 @@ class FirebaseCache:
                 f"Failed to write {industry} to Firestore: {e}"
             ) from e
 
+    async def write_async(self, industry: str, performance_data: dict) -> None:
+        """Write industry performance to Firestore non-blocking (runs in thread pool).
+
+        Updates L1 in-memory cache immediately, then offloads the Firestore
+        write to a thread executor so the caller is never blocked.
+
+        Args:
+            industry: Industry name (used as document ID).
+            performance_data: Performance dict from PerformanceCalculator.
+        """
+        # L1 update is instant — do it synchronously before yielding
+        self._l1[industry] = (performance_data, time.monotonic() + _L1_TTL_SECONDS)
+
+        def _do_write() -> None:
+            doc_ref = self._db.collection(self.COLLECTION_NAME).document(industry)
+            doc_ref.set(performance_data)
+            logger.info("Cached performance data (async) for %s", industry)
+
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(None, _do_write)
+        except Exception as e:
+            logger.error("Async Firestore write failed for %s: %s", industry, e)
+
+    async def write_batch_async(self, performances: list[dict]) -> int:
+        """Write multiple industry performances non-blocking (runs in thread pool).
+
+        Args:
+            performances: List of performance dicts.
+
+        Returns:
+            Number of records queued for write.
+        """
+        if not performances:
+            logger.warning("No performances to write")
+            return 0
+
+        # Update L1 immediately
+        for perf in performances:
+            industry = perf.get("industry")
+            if industry:
+                self._l1[industry] = (perf, time.monotonic() + _L1_TTL_SECONDS)
+
+        def _do_batch_write() -> int:
+            batch_size = 500
+            total_written = 0
+            for i in range(0, len(performances), batch_size):
+                batch_data = performances[i:i + batch_size]
+                batch = self._db.batch()
+                for perf in batch_data:
+                    industry = perf.get("industry")
+                    if not industry:
+                        logger.warning("Skipping performance with no industry key")
+                        continue
+                    doc_ref = self._db.collection(self.COLLECTION_NAME).document(industry)
+                    batch.set(doc_ref, perf)
+                batch.commit()
+                total_written += len(batch_data)
+                logger.info("Batch %d: wrote %d industries", i // batch_size + 1, len(batch_data))
+            return total_written
+
+        loop = asyncio.get_event_loop()
+        try:
+            total = await loop.run_in_executor(None, _do_batch_write)
+            logger.info("Total industries written (async): %d", total)
+            return total
+        except Exception as e:
+            logger.error("Async batch Firestore write failed: %s", e)
+            return 0
+
     def read(self, industry: str) -> Optional[dict]:
         """Read industry performance from cache.
+
+        Checks L1 in-memory cache first before hitting Firestore.
 
         Args:
             industry: Industry name.
@@ -98,6 +182,16 @@ class FirebaseCache:
         Raises:
             FirebaseCacheError: If read fails.
         """
+        # L1: in-memory hit
+        entry = self._l1.get(industry)
+        if entry is not None:
+            data, expire_at = entry
+            if time.monotonic() < expire_at:
+                logger.debug("L1 cache hit for %s", industry)
+                return data
+            # Expired — evict
+            del self._l1[industry]
+
         try:
             doc_ref = self._db.collection(self.COLLECTION_NAME).document(industry)
             doc = doc_ref.get()
@@ -108,6 +202,8 @@ class FirebaseCache:
 
             data = doc.to_dict()
             logger.debug("Retrieved cached data for %s", industry)
+            # Populate L1 for future reads
+            self._l1[industry] = (data, time.monotonic() + _L1_TTL_SECONDS)
             return data
 
         except Exception as e:

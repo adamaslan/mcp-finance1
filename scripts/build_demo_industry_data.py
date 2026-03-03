@@ -21,6 +21,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 import numpy as np
+from functools import partial
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -255,8 +256,9 @@ class DemoDataBuilder:
             batch.set(doc_ref, perf)
             count += 1
 
-        # Commit batch
-        batch.commit()
+        # Commit non-blocking — run sync Firestore call in thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, batch.commit)
 
         return count
 

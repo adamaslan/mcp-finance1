@@ -28,6 +28,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from functools import partial
 
 # Add src to path (mcp-finance1/cloud-run/src for technical_analysis_mcp modules)
 sys.path.insert(0, str(Path(__file__).parent.parent / "cloud-run" / "src"))
@@ -184,8 +185,9 @@ class HistoricalDataBuilder:
                 cache_ref = self.db.collection("industry_cache").document(industry)
                 batch.set(cache_ref, perf)
 
-        # Commit batch
-        batch.commit()
+        # Commit non-blocking — run sync Firestore call in thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, batch.commit)
 
         return count
 

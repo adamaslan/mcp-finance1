@@ -56,6 +56,18 @@ Key principles:
 3. **Error Handling** - Return HTTP 503 if dependencies unavailable
 4. **Testing** - Always test period changes with `test_all_mcp_tools_fixed.py`
 5. **Documentation** - Update logs go in `nu-logs2/` folder
+6. **Four-Layer Data Retrieval** - All data fetching must follow the four-layer cache hierarchy
+   - Base Pattern: `.claude/rules/FOUR_LAYER_DATA_RETRIEVAL.md`
+   - GCP-Optimized (RECOMMENDED): `.claude/rules/GCLOUD_OPTIMIZED_DATA_RETRIEVAL.md`
+   - Quick References: `.claude/skills/four-layer-cache.md` and `.claude/skills/gcp-optimized-cache.md`
+
+   **GCP Stack (Preferred for Production)**:
+   - Layer 0: Secret Manager (API keys)
+   - Layer 1: Memorystore/Redis (distributed cache)
+   - Layer 2a: Firestore (real-time results)
+   - Layer 2b: Cloud Storage (historical data)
+   - Layer 3: BigQuery (pre-computed metrics)
+   - Layer 4: API providers (yfinance, Alpha Vantage, Finnhub)
 
 ---
 
@@ -166,6 +178,12 @@ All 9 MCP tools now support configurable periods:
 
 ---
 
-**Last Updated**: January 28, 2026
+**Last Updated**: March 3, 2026
 **Version**: 1.1
 **Status**: Production Ready
+
+## Recent Changes (March 3, 2026)
+
+- Added `Four-Layer Data Retrieval` rule - Enforces unified caching architecture across all data fetching
+- Created `.claude/rules/FOUR_LAYER_DATA_RETRIEVAL.md` - Complete guide with implementation patterns
+- Rule applies to all 9 MCP tools and any new data fetching code
