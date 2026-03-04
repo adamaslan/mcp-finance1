@@ -122,7 +122,7 @@ Used for: Configuration examples, connection strings, structure documentation
 BEFORE: postgresql://admin:SecurePass123@prod-db.neon.tech:5432/mydb
 AFTER:  postgresql://[USERNAME]:[PASSWORD]@[HOST]:[PORT]/[DATABASE]
 
-BEFORE: firebase-config.json with API key AIzaSyCmicLheNasxh3RI_AtXlbtp4bOKdZBVYA
+BEFORE: firebase-config.json with API key AIzaSy-EXAMPLE-KEY-NOT-REAL-PLACEHOLDER
 AFTER:  firebase-config.json with API key [REDACTED]
 ```
 
@@ -268,7 +268,7 @@ Safe commit command:
 
 **Google API Keys**
 - Pattern: `AIzaSy[A-Za-z0-9_-]{35}`
-- Example: `AIzaSyCmicLheNasxh3RI_AtXlbtp4bOKdZBVYA`
+- Example: `AIzaSy-EXAMPLE-KEY-NOT-REAL-PLACEHOLDER`
 - Severity: 🔴 CRITICAL
 - Redaction: Full - `[REDACTED]`
 - Context: Often found in:
@@ -478,7 +478,7 @@ Never commit your API keys. See Security Guide for best practices.
 VERIFICATION: nu-docs/BACKEND_EXECUTION_REPORT.md
 
 🔴 CRITICAL FINDINGS (1):
-  Line 1153: Google API key AIzaSyCmicLheNasxh3RI_AtXlbtp4bOKdZBVYA
+  Line 1153: Google API key AIzaSy-EXAMPLE-KEY-NOT-REAL-PLACEHOLDER
              Type: Google API Key (Gemini)
              Action: ROTATE IMMEDIATELY - this key is exposed in git
 
