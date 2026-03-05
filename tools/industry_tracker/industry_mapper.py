@@ -39,14 +39,13 @@ class IndustryMapper:
         "Payments": "IPAY",
         "Regional Banks": "KRE",
 
-        # Consumer (8)
+        # Consumer (7)
         "Retail": "XRT",
         "E-Commerce": "IBUY",
         "Consumer Staples": "XLP",
         "Consumer Discretionary": "XLY",
-        "Restaurants": "PBJ",
-        "Apparel": "IYK",
         "Automotive": "CARZ",
+        "Electric Vehicles": "DRIV",
         "Luxury Goods": "LUXE",
 
         # Energy & Materials (5)
@@ -56,12 +55,13 @@ class IndustryMapper:
         "Steel": "SLX",
         "Chemicals": "XLB",
 
-        # Industrials (5)
+        # Industrials (6)
         "Aerospace & Defense": "ITA",
         "Transportation": "XTN",
         "Construction": "ITB",
         "Logistics": "FTXR",
         "Industrials": "XLI",
+        "Space & Satellites": "UFO",
 
         # Real Estate & Infrastructure (4)
         "Real Estate": "IYR",

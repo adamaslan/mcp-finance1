@@ -129,13 +129,11 @@ class IndustryService:
         # Compute fresh performance
         performance = await self._compute_industry_performance(industry, etf)
 
-        # Update cache
-        try:
-            self._cache.write(industry, performance)
-            logger.info("Cache updated for %s", industry)
-        except FirebaseCacheError as e:
-            logger.error("Failed to update cache for %s: %s", industry, e)
-            # Don't fail the request - return the data anyway
+        # Update cache non-blocking (fire-and-forget via asyncio.create_task)
+        asyncio.create_task(
+            self._cache.write_async(industry, performance),
+        )
+        logger.debug("Queued non-blocking cache write for %s", industry)
 
         return performance
 
@@ -403,7 +401,9 @@ class IndustryService:
                 performance = self._calculator.calculate_industry_performance(
                     industry=industry, etf=etf, df=df,
                 )
-                self._cache.write(industry, performance)
+                asyncio.create_task(
+                    self._cache.write_async(industry, performance),
+                )
                 updated += 1
             except Exception as e:
                 logger.error("Daily update failed for %s (%s): %s", industry, etf, e)
