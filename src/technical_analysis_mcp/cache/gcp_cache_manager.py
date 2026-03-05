@@ -21,7 +21,6 @@ from enum import Enum
 
 import redis
 from google.cloud import firestore, storage, bigquery, tasks_v2, secretmanager, datastore
-from google.api_core import gapic_v1
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -50,21 +49,54 @@ class GCPCacheManager:
     """
     Unified cache manager implementing all 7 GCP-optimized layers.
     Automatically falls through layers until data found.
+
+    Usage:
+        manager = GCPCacheManager()
+        await manager.initialize()   # must be called before use
     """
 
     def __init__(self, project_id: str = "ttb-lang1"):
-        self.project_id = project_id
+        self.project_id = os.getenv("GCP_PROJECT_ID", project_id)
         self.initialized = False
-        self.layers_available = {}
+        self.layers_available: Dict[CacheLayer, bool] = {}
 
-        # Initialize all layers
-        self._init_layers()
+        # Clients set during initialize()
+        self.secrets_client: Optional[secretmanager.SecretManagerServiceClient] = None
+        self.redis: Optional[redis.Redis] = None
+        self.firestore_db: Optional[firestore.AsyncClient] = None
+        self.storage_client: Optional[storage.Client] = None
+        self.bucket: Optional[storage.Bucket] = None
+        self.bq_client: Optional[bigquery.Client] = None
+        self.tasks_client: Optional[tasks_v2.CloudTasksClient] = None
+        self.ds_client: Optional[datastore.Client] = None
+        self.cloud_tasks_region: str = ""
+        self.cloud_tasks_queue: str = ""
 
-    def _init_layers(self):
-        """Initialize all GCP services with fallback."""
-        self.project_id = os.getenv("GCP_PROJECT_ID", self.project_id)
+    async def initialize(self) -> None:
+        """
+        Initialize all GCP service clients.
 
-        # L0: Secret Manager
+        Blocking I/O (ping, health-check reads) is offloaded to a thread pool
+        so the event loop is never blocked. Safe to call from async startup.
+        """
+        await asyncio.gather(
+            self._init_secret_manager(),
+            self._init_redis(),
+            self._init_firestore(),
+            self._init_cloud_storage(),
+            self._init_bigquery(),
+            self._init_cloud_tasks(),
+            self._init_datastore(),
+        )
+        self.initialized = True
+        available = sum(self.layers_available.values())
+        logger.info(f"GCP Cache Manager initialized: {available}/6 layers available")
+
+    # ------------------------------------------------------------------
+    # Layer initializers (each runs its blocking probe in a thread)
+    # ------------------------------------------------------------------
+
+    async def _init_secret_manager(self) -> None:
         try:
             self.secrets_client = secretmanager.SecretManagerServiceClient()
             self.layers_available[CacheLayer.SECRET_MANAGER] = True
@@ -73,19 +105,19 @@ class GCPCacheManager:
             logger.warning(f"✗ Secret Manager failed: {e}")
             self.layers_available[CacheLayer.SECRET_MANAGER] = False
 
-        # L1: Redis/Memorystore
+    async def _init_redis(self) -> None:
         try:
             redis_host = os.getenv("REDIS_HOST", "localhost")
             redis_port = int(os.getenv("REDIS_PORT", 6379))
-            self.redis = redis.Redis(
+            r = redis.Redis(
                 host=redis_host,
                 port=redis_port,
                 decode_responses=True,
                 socket_connect_timeout=5,
                 socket_keepalive=True,
             )
-            # Test connection
-            self.redis.ping()
+            await asyncio.to_thread(r.ping)
+            self.redis = r
             self.layers_available[CacheLayer.REDIS] = True
             logger.info(f"✓ Redis initialized ({redis_host}:{redis_port})")
         except Exception as e:
@@ -93,10 +125,11 @@ class GCPCacheManager:
             self.layers_available[CacheLayer.REDIS] = False
             self.redis = None
 
-        # L2a: Firestore
+    async def _init_firestore(self) -> None:
         try:
-            self.firestore_db = firestore.Client(project=self.project_id)
-            self.firestore_db.collection("_health").document("check").get()  # Test
+            # AsyncClient is required so await calls inside async methods work
+            self.firestore_db = firestore.AsyncClient(project=self.project_id)
+            await self.firestore_db.collection("_health").document("check").get()
             self.layers_available[CacheLayer.FIRESTORE] = True
             logger.info("✓ Firestore initialized")
         except Exception as e:
@@ -104,12 +137,14 @@ class GCPCacheManager:
             self.layers_available[CacheLayer.FIRESTORE] = False
             self.firestore_db = None
 
-        # L2b: Cloud Storage
+    async def _init_cloud_storage(self) -> None:
         try:
-            self.storage_client = storage.Client(project=self.project_id)
             bucket_name = os.getenv("BUCKET_NAME", "mcp-cache-historical")
-            self.bucket = self.storage_client.bucket(bucket_name)
-            self.bucket.reload()  # Test
+            client = storage.Client(project=self.project_id)
+            bucket = client.bucket(bucket_name)
+            await asyncio.to_thread(bucket.reload)
+            self.storage_client = client
+            self.bucket = bucket
             self.layers_available[CacheLayer.CLOUD_STORAGE] = True
             logger.info(f"✓ Cloud Storage initialized ({bucket_name})")
         except Exception as e:
@@ -117,11 +152,11 @@ class GCPCacheManager:
             self.layers_available[CacheLayer.CLOUD_STORAGE] = False
             self.bucket = None
 
-        # L3: BigQuery
+    async def _init_bigquery(self) -> None:
         try:
-            self.bq_client = bigquery.Client(project=self.project_id)
-            # Test connection
-            self.bq_client.get_dataset(f"{self.project_id}.mcp_cache")
+            client = bigquery.Client(project=self.project_id)
+            await asyncio.to_thread(client.get_dataset, f"{self.project_id}.mcp_cache")
+            self.bq_client = client
             self.layers_available[CacheLayer.BIGQUERY] = True
             logger.info("✓ BigQuery initialized")
         except Exception as e:
@@ -129,7 +164,7 @@ class GCPCacheManager:
             self.layers_available[CacheLayer.BIGQUERY] = False
             self.bq_client = None
 
-        # L4: Cloud Tasks
+    async def _init_cloud_tasks(self) -> None:
         try:
             self.tasks_client = tasks_v2.CloudTasksClient()
             self.cloud_tasks_region = os.getenv("CLOUD_TASKS_REGION", "us-central1")
@@ -141,8 +176,13 @@ class GCPCacheManager:
             self.layers_available[CacheLayer.CLOUD_TASKS] = False
             self.tasks_client = None
 
-        self.initialized = True
-        logger.info(f"GCP Cache Manager initialized: {sum(self.layers_available.values())}/6 layers available")
+    async def _init_datastore(self) -> None:
+        try:
+            self.ds_client = datastore.Client(project=self.project_id)
+            logger.info("✓ Datastore (quota tracker) initialized")
+        except Exception as e:
+            logger.warning(f"✗ Datastore failed: {e}")
+            self.ds_client = None
 
     # ============================================================================
     # L0: SECRET MANAGER
@@ -177,7 +217,7 @@ class GCPCacheManager:
     # L1: REDIS (Distributed Cache)
     # ============================================================================
 
-    def get_from_redis(self, key: str) -> Optional[dict]:
+    async def get_from_redis(self, key: str) -> Optional[dict]:
         """
         Get value from Redis (L1).
 
@@ -191,7 +231,7 @@ class GCPCacheManager:
             return None
 
         try:
-            value = self.redis.get(key)
+            value = await asyncio.to_thread(self.redis.get, key)
             if value:
                 logger.debug(f"L1 HIT: {key}")
                 return json.loads(value)
@@ -200,9 +240,9 @@ class GCPCacheManager:
             logger.warning("Redis connection failed, skipping L1")
             return None
 
-    def set_in_redis(self, key: str, value: Any, ttl: int = 300) -> bool:
+    async def set_in_redis(self, key: str, value: Any, ttl: int = 300) -> bool:
         """
-        Set value in Redis with TTL (non-blocking).
+        Set value in Redis with TTL.
 
         Args:
             key: Cache key
@@ -216,7 +256,7 @@ class GCPCacheManager:
             return False
 
         try:
-            self.redis.setex(key, ttl, json.dumps(value))
+            await asyncio.to_thread(self.redis.setex, key, ttl, json.dumps(value))
             logger.debug(f"L1 SET: {key} (TTL: {ttl}s)")
             return True
         except redis.ConnectionError:
@@ -268,13 +308,12 @@ class GCPCacheManager:
             ttl: Time-to-live in seconds
 
         Returns:
-            True if successful (non-blocking, so always returns immediately)
+            True if task scheduled
         """
         if not self.firestore_db:
             return False
 
         try:
-            # Non-blocking write
             asyncio.create_task(
                 self.firestore_db.collection(collection).document(doc_id).set({
                     "result": data,
@@ -292,7 +331,7 @@ class GCPCacheManager:
     # L2B: CLOUD STORAGE (Historical Data)
     # ============================================================================
 
-    def get_from_cloud_storage(self, symbol: str, period: str = "daily") -> Optional[dict]:
+    async def get_from_cloud_storage(self, symbol: str, period: str = "daily") -> Optional[dict]:
         """
         Get historical data from Cloud Storage (L2b).
 
@@ -307,21 +346,25 @@ class GCPCacheManager:
             return None
 
         try:
-            blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
-            if blob.exists():
-                age = time.time() - blob.updated.timestamp()
-                if age < 300:  # Still fresh (5 min TTL)
-                    data = json.loads(blob.download_as_string())
-                    logger.debug(f"L2b HIT: historical/{symbol}/{period}")
-                    return data
-            return None
+            return await asyncio.to_thread(self._read_cloud_storage_blob, symbol, period)
         except Exception as e:
             logger.debug(f"Cloud Storage read failed: {e}")
             return None
 
-    def set_in_cloud_storage(self, symbol: str, data: dict, period: str = "daily") -> bool:
+    def _read_cloud_storage_blob(self, symbol: str, period: str) -> Optional[dict]:
+        """Blocking helper for get_from_cloud_storage — runs in thread pool."""
+        blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
+        if blob.exists():
+            age = time.time() - blob.updated.timestamp()
+            if age < 300:
+                data = json.loads(blob.download_as_string())
+                logger.debug(f"L2b HIT: historical/{symbol}/{period}")
+                return data
+        return None
+
+    async def set_in_cloud_storage(self, symbol: str, data: dict, period: str = "daily") -> bool:
         """
-        Write historical data to Cloud Storage (non-blocking, L2b).
+        Write historical data to Cloud Storage (L2b).
 
         Args:
             symbol: Stock symbol
@@ -335,22 +378,23 @@ class GCPCacheManager:
             return False
 
         try:
-            blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
-            blob.upload_from_string(
-                json.dumps(data),
-                content_type="application/json"
-            )
-            logger.debug(f"L2b SET: historical/{symbol}/{period}")
+            await asyncio.to_thread(self._write_cloud_storage_blob, symbol, data, period)
             return True
         except Exception as e:
             logger.warning(f"Cloud Storage write failed: {e}")
             return False
 
+    def _write_cloud_storage_blob(self, symbol: str, data: dict, period: str) -> None:
+        """Blocking helper for set_in_cloud_storage — runs in thread pool."""
+        blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
+        blob.upload_from_string(json.dumps(data), content_type="application/json")
+        logger.debug(f"L2b SET: historical/{symbol}/{period}")
+
     # ============================================================================
     # L3: BIGQUERY (Pre-computed Metrics)
     # ============================================================================
 
-    def get_from_bigquery(self, symbol: str) -> Optional[dict]:
+    async def get_from_bigquery(self, symbol: str) -> Optional[dict]:
         """
         Get pre-computed daily metrics from BigQuery (L3).
 
@@ -364,26 +408,29 @@ class GCPCacheManager:
             return None
 
         try:
-            from google.cloud import bigquery as bq
-            query = f"""
-            SELECT *
-            FROM `{self.project_id}.mcp_cache.daily_analysis`
-            WHERE symbol = @symbol
-            ORDER BY trade_date DESC
-            LIMIT 1
-            """
-            job_config = bq.QueryJobConfig(
-                query_parameters=[bq.ScalarQueryParameter("symbol", "STRING", symbol)]
-            )
-            results = self.bq_client.query_and_wait(query, job_config=job_config, timeout=10)
-            if results.total_rows > 0:
-                metrics = dict(results.to_dataframe().iloc[0])
-                logger.debug(f"L3 HIT: BigQuery/{symbol}")
-                return metrics
-            return None
+            return await asyncio.to_thread(self._query_bigquery, symbol)
         except Exception as e:
             logger.debug(f"BigQuery query failed: {e}")
             return None
+
+    def _query_bigquery(self, symbol: str) -> Optional[dict]:
+        """Blocking helper for get_from_bigquery — runs in thread pool."""
+        query = f"""
+        SELECT *
+        FROM `{self.project_id}.mcp_cache.daily_analysis`
+        WHERE symbol = @symbol
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("symbol", "STRING", symbol)]
+        )
+        results = self.bq_client.query_and_wait(query, job_config=job_config, timeout=10)
+        if results.total_rows > 0:
+            metrics = dict(results.to_dataframe().iloc[0])
+            logger.debug(f"L3 HIT: BigQuery/{symbol}")
+            return metrics
+        return None
 
     # ============================================================================
     # L4: CLOUD TASKS (Background Refresh)
@@ -417,7 +464,6 @@ class GCPCacheManager:
                 self.cloud_tasks_queue
             )
 
-            # Get refresh endpoint URL from environment
             refresh_url = os.getenv(
                 "CACHE_REFRESH_URL",
                 "https://mcp-backend.cloud.run/api/cache-refresh"
@@ -449,36 +495,36 @@ class GCPCacheManager:
     # QUOTA TRACKING (Datastore)
     # ============================================================================
 
-    def get_api_quota(self, provider: str) -> int:
+    async def get_api_quota(self, provider: str) -> int:
         """
         Get remaining API quota for provider.
 
         Args:
-            provider: Provider name (e.g., "alpha-vantage")
+            provider: Provider name (e.g., "finnhub")
 
         Returns:
             Remaining calls available
         """
+        if not self.ds_client:
+            return 0
+
         try:
-            ds = datastore.Client(project=self.project_id)
-            key = ds.key("APIQuota", provider)
-            quota = ds.get(key)
-
-            if quota is None:
-                # Initialize with default
-                if provider == "alpha-vantage":
-                    return 25
-                return 100
-
-            remaining = quota.get("remaining", 0)
-            logger.debug(f"Quota check: {provider} has {remaining} calls remaining")
-            return remaining
-
+            return await asyncio.to_thread(self._read_quota, provider)
         except Exception as e:
             logger.error(f"Quota check failed: {e}")
             return 0
 
-    def decrement_api_quota(self, provider: str) -> bool:
+    def _read_quota(self, provider: str) -> int:
+        """Blocking helper for get_api_quota — runs in thread pool."""
+        key = self.ds_client.key("APIQuota", provider)
+        quota = self.ds_client.get(key)
+        if quota is None:
+            return 25 if provider == "alpha-vantage" else 100
+        remaining = quota.get("remaining", 0)
+        logger.debug(f"Quota check: {provider} has {remaining} calls remaining")
+        return remaining
+
+    async def decrement_api_quota(self, provider: str) -> bool:
         """
         Atomically decrement API quota.
 
@@ -488,31 +534,36 @@ class GCPCacheManager:
         Returns:
             True if quota decremented, False if exhausted
         """
+        if not self.ds_client:
+            return False
+
         try:
-            ds = datastore.Client(project=self.project_id)
-            key = ds.key("APIQuota", provider)
-
-            with ds.transaction():
-                quota = ds.get(key)
-                if quota is None:
-                    quota = datastore.Entity(key=key)
-                    quota["remaining"] = 24 if provider == "alpha-vantage" else 99
-                else:
-                    quota["remaining"] -= 1
-
-                quota["updated"] = datetime.utcnow()
-
-                if quota["remaining"] <= 0:
-                    logger.critical(f"API quota exhausted for {provider}")
-                    return False
-
-                ds.put(quota)
-                logger.debug(f"Quota decremented: {provider} ({quota['remaining']} remaining)")
-                return True
-
+            return await asyncio.to_thread(self._decrement_quota, provider)
         except Exception as e:
             logger.error(f"Quota decrement failed: {e}")
             return False
+
+    def _decrement_quota(self, provider: str) -> bool:
+        """Blocking helper for decrement_api_quota — runs in thread pool."""
+        key = self.ds_client.key("APIQuota", provider)
+
+        with self.ds_client.transaction():
+            quota = self.ds_client.get(key)
+            if quota is None:
+                quota = datastore.Entity(key=key)
+                quota["remaining"] = 24 if provider == "alpha-vantage" else 99
+            else:
+                quota["remaining"] -= 1
+
+            quota["updated"] = datetime.utcnow()
+
+            if quota["remaining"] <= 0:
+                logger.critical(f"API quota exhausted for {provider}")
+                return False
+
+            self.ds_client.put(quota)
+            logger.debug(f"Quota decremented: {provider} ({quota['remaining']} remaining)")
+            return True
 
     # ============================================================================
     # UNIFIED GET METHOD (Implements Full 7-Layer Fallthrough)
@@ -523,7 +574,7 @@ class GCPCacheManager:
         key: str,
         symbol: str = None,
         tool_name: str = None
-    ) -> CacheHit:
+    ) -> Optional[CacheHit]:
         """
         Retrieve from cache following 7-layer hierarchy.
 
@@ -543,9 +594,8 @@ class GCPCacheManager:
             CacheHit with data and layer, or None if all miss
         """
         # L1: Redis
-        if data := self.get_from_redis(key):
+        if data := await self.get_from_redis(key):
             hit = CacheHit(layer=CacheLayer.REDIS, data=data, timestamp=datetime.utcnow())
-            # Schedule background refresh if specified
             if symbol and tool_name:
                 self.schedule_cache_refresh(symbol, tool_name)
             return hit
@@ -559,7 +609,7 @@ class GCPCacheManager:
 
         # L2b: Cloud Storage (if symbol provided)
         if symbol:
-            if data := self.get_from_cloud_storage(symbol):
+            if data := await self.get_from_cloud_storage(symbol):
                 return CacheHit(
                     layer=CacheLayer.CLOUD_STORAGE,
                     data=data,
@@ -568,7 +618,7 @@ class GCPCacheManager:
 
         # L3: BigQuery (if symbol provided)
         if symbol:
-            if data := self.get_from_bigquery(symbol):
+            if data := await self.get_from_bigquery(symbol):
                 return CacheHit(
                     layer=CacheLayer.BIGQUERY,
                     data=data,
@@ -589,9 +639,9 @@ class GCPCacheManager:
         Write to all available cache layers (non-blocking).
 
         Writes to:
-        1. L1: Redis (immediate)
+        1. L1: Redis (async)
         2. L2a: Firestore (async)
-        3. L2b: Cloud Storage (async)
+        3. L2b: Cloud Storage (async background task)
 
         Args:
             key: Cache key
@@ -604,19 +654,14 @@ class GCPCacheManager:
         """
         layers_written = 0
 
-        # L1: Redis (immediate)
-        if self.set_in_redis(key, data, ttl):
+        if await self.set_in_redis(key, data, ttl):
             layers_written += 1
 
-        # L2a: Firestore (async, non-blocking)
         if await self.set_in_firestore("mcp_tool_cache", key, data, ttl):
             layers_written += 1
 
-        # L2b: Cloud Storage (async, non-blocking)
         if symbol:
-            asyncio.create_task(
-                asyncio.to_thread(self.set_in_cloud_storage, symbol, data)
-            )
+            asyncio.create_task(self.set_in_cloud_storage(symbol, data))
             layers_written += 1
 
         logger.info(f"Cached to {layers_written} layers: {key}")
@@ -642,18 +687,19 @@ class GCPCacheManager:
         total = len(status)
 
         logger.info(f"Cache system status: {available}/{total} layers available")
-        for layer, available in status.items():
-            symbol = "✓" if available else "✗"
+        for layer, is_available in status.items():
+            symbol = "✓" if is_available else "✗"
             logger.info(f"  {symbol} {layer.name} ({layer.value})")
 
 
 # Global instance
-_cache_manager = None
+_cache_manager: Optional[GCPCacheManager] = None
 
 
-def get_cache_manager() -> GCPCacheManager:
-    """Get or create global cache manager instance."""
+async def get_cache_manager() -> GCPCacheManager:
+    """Get or create global cache manager instance (initializes on first call)."""
     global _cache_manager
     if _cache_manager is None:
         _cache_manager = GCPCacheManager()
+        await _cache_manager.initialize()
     return _cache_manager
