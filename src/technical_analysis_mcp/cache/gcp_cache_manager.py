@@ -13,6 +13,7 @@ Layer 5: API Providers (yfinance, Alpha Vantage, Finnhub)
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from typing import Optional, Any, Dict
@@ -331,6 +332,23 @@ class GCPCacheManager:
     # L2B: CLOUD STORAGE (Historical Data)
     # ============================================================================
 
+    # Allowlists for Cloud Storage path components
+    _SYMBOL_RE = re.compile(r'^[A-Z]{1,10}$')
+    _PERIOD_ALLOWLIST = frozenset({"daily", "1h", "15m", "5m", "1m", "weekly", "monthly"})
+
+    @classmethod
+    def _validate_storage_path(cls, symbol: str, period: str) -> None:
+        """
+        Validate symbol and period before using them in a GCS blob path.
+
+        Raises:
+            ValueError: if either value does not match its allowlist/pattern.
+        """
+        if not cls._SYMBOL_RE.match(symbol):
+            raise ValueError(f"Invalid symbol for storage path: {symbol!r}")
+        if period not in cls._PERIOD_ALLOWLIST:
+            raise ValueError(f"Invalid period for storage path: {period!r}")
+
     async def get_from_cloud_storage(self, symbol: str, period: str = "daily") -> Optional[dict]:
         """
         Get historical data from Cloud Storage (L2b).
@@ -353,6 +371,7 @@ class GCPCacheManager:
 
     def _read_cloud_storage_blob(self, symbol: str, period: str) -> Optional[dict]:
         """Blocking helper for get_from_cloud_storage — runs in thread pool."""
+        self._validate_storage_path(symbol, period)
         blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
         if blob.exists():
             age = time.time() - blob.updated.timestamp()
@@ -386,6 +405,7 @@ class GCPCacheManager:
 
     def _write_cloud_storage_blob(self, symbol: str, data: dict, period: str) -> None:
         """Blocking helper for set_in_cloud_storage — runs in thread pool."""
+        self._validate_storage_path(symbol, period)
         blob = self.bucket.blob(f"historical/{symbol}/{period}/data.json")
         blob.upload_from_string(json.dumps(data), content_type="application/json")
         logger.debug(f"L2b SET: historical/{symbol}/{period}")
