@@ -41,7 +41,7 @@ MIN_DATA_POINTS_200MA: Final[int] = 200
 
 # API Configuration
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL: Final[str] = "gemini-2.0-flash-exp"
+GEMINI_MODEL: Final[str] = "gemini-2.0-flash"
 
 # Analysis Limits
 MAX_SIGNALS_RETURNED: Final[int] = 50

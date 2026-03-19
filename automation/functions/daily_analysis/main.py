@@ -10,10 +10,13 @@ to ensure single source of truth for all analysis logic.
 
 import functions_framework
 from google.cloud import firestore
+import json
 import os
 import sys
 from datetime import datetime
 import time
+import pandas as pd
+import numpy as np
 
 # Add shared library to path
 sys.path.insert(0, '/workspace')
@@ -352,7 +355,7 @@ def analyze_symbol(symbol: str) -> dict:
     the technical_analysis_mcp library, ensuring single source of truth.
     """
     try:
-        result = analyzer.analyze(symbol, period='3mo')
+        result = analyzer.analyze(symbol, period='6mo')
         return result
     except (InvalidSymbolError, DataFetchError, InsufficientDataError) as e:
         return {
