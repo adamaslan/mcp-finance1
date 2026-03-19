@@ -16,6 +16,7 @@ from .config import DEFAULT_PERIOD
 from .data import create_data_fetcher
 from .exceptions import DataFetchError, InsufficientDataError, InvalidSymbolError
 from .indicators import (
+    calculate_all_indicators,
     calculate_bollinger_bands,
     calculate_indicators_dict,
     calculate_macd,
@@ -99,6 +100,7 @@ class StockAnalyzer:
 
             # Step 2: Calculate indicators
             logger.debug("Calculating indicators for %s", symbol)
+            df = calculate_all_indicators(df)
             indicators_dict = self._get_indicators(df)
 
             # Step 3: Detect signals
