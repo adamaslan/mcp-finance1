@@ -22,22 +22,23 @@ MAX_RETRY_ATTEMPTS: Final[int] = 3
 RETRY_BACKOFF_SECONDS: Final[float] = 1.0
 
 # Indicator Periods - OPTIMIZED FOR SWING TRADING
+# Short-period mode: reduced to support 1mo (~22 candle) data windows
 MA_PERIODS: Final[tuple[int, ...]] = (5, 10, 20, 50, 100, 200)
-RSI_PERIOD: Final[int] = 24  # Swing trading: smoother, fewer whipsaws (was 14)
-MACD_FAST: Final[int] = 20  # Swing trading: longer periods (was 12)
-MACD_SLOW: Final[int] = 50  # Swing trading: longer periods (was 26)
-MACD_SIGNAL: Final[int] = 20  # Swing trading: longer signal line (was 9)
+RSI_PERIOD: Final[int] = 14  # Reduced from 24 to fit 22-candle window
+MACD_FAST: Final[int] = 12  # Reduced from 20 to fit 22-candle window
+MACD_SLOW: Final[int] = 20  # Reduced from 50 — must be < MIN_DATA_POINTS
+MACD_SIGNAL: Final[int] = 9   # Reduced from 20 to fit 22-candle window
 BOLLINGER_PERIOD: Final[int] = 20
 BOLLINGER_STD: Final[float] = 2.0
 STOCHASTIC_K_PERIOD: Final[int] = 14
 STOCHASTIC_D_PERIOD: Final[int] = 3
-ADX_PERIOD: Final[int] = 25  # Swing trading: stronger trend identification (was 14)
+ADX_PERIOD: Final[int] = 14  # Reduced from 25 to fit 22-candle window
 ATR_PERIOD: Final[int] = 14  # Keep for stop loss calculations
-VOLUME_MA_SHORT: Final[int] = 20
-VOLUME_MA_LONG: Final[int] = 50
+VOLUME_MA_SHORT: Final[int] = 10  # Reduced from 20 to fit 22-candle window
+VOLUME_MA_LONG: Final[int] = 20   # Reduced from 50 — must be < MIN_DATA_POINTS
 
 # Minimum data requirements
-MIN_DATA_POINTS: Final[int] = 50
+MIN_DATA_POINTS: Final[int] = 22  # Reduced from 50 to support 1mo (~22 trading days)
 MIN_DATA_POINTS_200MA: Final[int] = 200
 
 # API Configuration

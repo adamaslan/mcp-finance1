@@ -1,0 +1,11 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'build'
+  - '-f'
+  - 'cloud-run/Dockerfile'
+  - '-t'
+  - 'us-central1-docker.pkg.dev/ttb-lang1/cloud-run-source-deploy/technical-analysis-mcp:preview'
+  - '.'
+images:
+- 'us-central1-docker.pkg.dev/ttb-lang1/cloud-run-source-deploy/technical-analysis-mcp:preview'
