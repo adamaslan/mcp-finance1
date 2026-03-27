@@ -228,6 +228,11 @@ async def list_tools() -> list[Tool]:
                         "default": "3mo",
                         "description": "Time period (15m, 1h, 4h, 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y) - SWING TRADING: 3mo for trend analysis",
                     },
+                    "use_ai": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Enable AI-powered signal ranking (disable to reduce latency/cost)",
+                    },
                 },
                 "required": ["symbol"],
             },
@@ -883,6 +888,7 @@ def _meets_criteria(analysis: dict[str, Any], criteria: dict[str, Any]) -> bool:
 async def get_trade_plan(
     symbol: str,
     period: str = DEFAULT_PERIOD,
+    use_ai: bool = True,
 ) -> dict[str, Any]:
     """Generate risk-qualified trade plan(s) for a security.
 
@@ -892,13 +898,14 @@ async def get_trade_plan(
     Args:
         symbol: Ticker symbol.
         period: Time period for analysis.
+        use_ai: Enable AI-powered signal ranking. Disable to reduce latency/cost.
 
     Returns:
         RiskAnalysisResult with trade plans or suppression reasons.
     """
     symbol = symbol.upper().strip()
 
-    logger.info("Getting trade plan for %s (period: %s)", symbol, period)
+    logger.info("Getting trade plan for %s (period: %s, use_ai: %s)", symbol, period, use_ai)
 
     # Reuse existing pipeline
     fetcher = get_data_fetcher()
@@ -914,12 +921,11 @@ async def get_trade_plan(
         "change": float(current.get("Price_Change", 0)),
     }
 
-    # Rank signals (rule-based only, no AI for simplicity)
     ranked_signals = rank_signals(
         signals=signals,
         symbol=symbol,
         market_data=market_data,
-        use_ai=True,
+        use_ai=use_ai,
     )
 
     # Apply risk assessment
