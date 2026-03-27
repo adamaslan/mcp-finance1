@@ -919,7 +919,7 @@ async def get_trade_plan(
         signals=signals,
         symbol=symbol,
         market_data=market_data,
-        use_ai=False,
+        use_ai=True,
     )
 
     # Apply risk assessment
