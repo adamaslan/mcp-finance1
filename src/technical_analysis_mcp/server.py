@@ -699,7 +699,7 @@ async def analyze_security(
     avg_score = (
         sum(s.ai_score or 50 for s in ranked_signals) / len(ranked_signals)
         if ranked_signals
-        else 0
+        else 50  # neutral baseline when no signals detected
     )
 
     # Respect config's max_signals_returned
