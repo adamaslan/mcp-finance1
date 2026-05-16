@@ -5,8 +5,9 @@ for extensibility. Each detector focuses on a specific category of signals.
 """
 
 import logging
-import signal as _signal
+import math
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Protocol
 
 import pandas as pd
@@ -456,7 +457,6 @@ _SR_PROXIMITIES = [0.005, 0.01, 0.02]
 def _sf(val) -> float | None:
     """Safe float — returns None on NaN/Inf/None."""
     try:
-        import math
         v = float(val)
         return None if (math.isnan(v) or math.isinf(v)) else v
     except Exception:
@@ -832,42 +832,23 @@ def _run_detector_with_timeout(
     df: pd.DataFrame,
     timeout_ms: int,
 ) -> list[MutableSignal]:
-    """Run a detector with a wall-clock timeout.
+    """Run a detector with a wall-clock timeout using a thread pool.
 
-    Falls back gracefully — returns [] if the timeout is exceeded or if the
-    detector throws.  Uses SIGALRM on POSIX; on non-POSIX platforms the
-    timeout is checked via elapsed time after the call (best-effort).
+    SIGALRM is process-wide and not safe in concurrent async environments —
+    concurrent requests would overwrite each other's timers, and signal.signal
+    can only be called from the main thread. ThreadPoolExecutor.submit gives
+    us a clean future we can wait on with a timeout, which is safe across
+    threads and asyncio tasks.
     """
     name = detector.__class__.__name__
     timeout_s = timeout_ms / 1000.0
 
-    # POSIX path: use SIGALRM for hard preemption
-    try:
-        import signal as _sig
-        has_sigalrm = hasattr(_sig, "SIGALRM")
-    except ImportError:
-        has_sigalrm = False
-
-    if has_sigalrm:
-        def _timeout_handler(signum, frame):
-            raise TimeoutError(f"Detector {name} exceeded {timeout_ms}ms")
-
-        old_handler = _signal.signal(_signal.SIGALRM, _timeout_handler)
-        _signal.setitimer(_signal.ITIMER_REAL, timeout_s)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(detector.detect, df)
         try:
-            result = detector.detect(df)
-        finally:
-            _signal.setitimer(_signal.ITIMER_REAL, 0)
-            _signal.signal(_signal.SIGALRM, old_handler)
-        return result
-
-    # Non-POSIX path: call then check elapsed time; log overrun but don't discard
-    t0 = time.monotonic()
-    result = detector.detect(df)
-    elapsed_ms = (time.monotonic() - t0) * 1000
-    if elapsed_ms > timeout_ms:
-        logger.warning("Detector %s took %.0f ms (limit %d ms)", name, elapsed_ms, timeout_ms)
-    return result
+            return future.result(timeout=timeout_s)
+        except FuturesTimeoutError:
+            raise TimeoutError(f"Detector {name} exceeded {timeout_ms}ms")
 
 
 class SignalList(list):
@@ -881,14 +862,10 @@ class SignalList(list):
     degraded: bool
     warnings: list[str]
 
-    def __new__(cls, signals: list[MutableSignal], degraded: bool, warnings: list[str]):
-        obj = super().__new__(cls, signals)
-        obj.degraded = degraded
-        obj.warnings = warnings
-        return obj
-
     def __init__(self, signals: list[MutableSignal], degraded: bool, warnings: list[str]):
         super().__init__(signals)
+        self.degraded = degraded
+        self.warnings = warnings
 
 
 def detect_all_signals(
