@@ -6,6 +6,7 @@ Provides dynamic swing point detection for robust Fibonacci analysis.
 """
 
 from typing import Dict, Tuple
+import numpy as np
 import pandas as pd
 
 
@@ -66,8 +67,13 @@ class SwingPointDetector:
         # integers in any order, and only position says which extreme came first.
         if window > len(self.df):
             window = len(self.df)
-        high_pos = int(self.df['High'].iloc[-window:].to_numpy().argmax())
-        low_pos = int(self.df['Low'].iloc[-window:].to_numpy().argmin())
+        highs = self.df['High'].iloc[-window:].to_numpy(dtype=float)
+        lows = self.df['Low'].iloc[-window:].to_numpy(dtype=float)
+        if np.isnan(highs).all() or np.isnan(lows).all():
+            return 'DOWN'
+        # nan-aware, to pick the same bars detect_swings' max()/min() skip to
+        high_pos = int(np.nanargmax(highs))
+        low_pos = int(np.nanargmin(lows))
         if low_pos < high_pos:
             return 'UP'
         return 'DOWN'

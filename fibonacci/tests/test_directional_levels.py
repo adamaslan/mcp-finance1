@@ -56,3 +56,11 @@ def test_direction_uses_bar_position_not_index_labels():
     df = pd.DataFrame({"High": [c + 1 for c in closes], "Low": [c - 1 for c in closes]},
                       index=list(range(59, -1, -1)))  # labels descend while time ascends
     assert SwingPointDetector(df).get_trend_direction(50) == "UP"
+
+
+def test_direction_ignores_missing_prices():
+    import pandas as pd
+    from fibonacci.analysis.swing_detector import SwingPointDetector
+
+    df = pd.DataFrame({"High": [float("nan"), 10.0, 20.0], "Low": [8.0, 5.0, 9.0]})
+    assert SwingPointDetector(df).get_trend_direction(3) == "UP"  # low at bar 1, high at bar 2
