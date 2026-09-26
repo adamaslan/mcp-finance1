@@ -5,6 +5,8 @@ from typing import Dict, Any
 
 from .enums import SignalStrength, FibonacciType
 
+_DIRECTIONAL_TYPES = frozenset({FibonacciType.RETRACE, FibonacciType.EXTENSION})
+
 
 @dataclass
 class FibonacciLevel:
@@ -17,13 +19,22 @@ class FibonacciLevel:
     description: str = ""
     price: float = 0.0
 
-    def calculate_price(self, low: float, high: float) -> float:
-        """Calculate price level from swing range."""
+    def calculate_price(self, low: float, high: float, is_uptrend: bool | None = None) -> float:
+        """Calculate price level from swing range.
+
+        Retracements are measured back from the leg's end: down from the high
+        after an up-leg, up from the low after a down-leg. Extensions run on in
+        the leg's direction. ``is_uptrend=None`` keeps the legacy behaviour of
+        measuring every ratio up from the low. INVERSE levels carry negative
+        ratios and are always measured from the low.
+        """
         swing_range = high - low
-        if self.fib_type == FibonacciType.INVERSE:
+        if is_uptrend is None or self.fib_type not in _DIRECTIONAL_TYPES:
             self.price = low + (self.ratio * swing_range)
+        elif self.fib_type == FibonacciType.RETRACE:
+            self.price = high - (self.ratio * swing_range) if is_uptrend else low + (self.ratio * swing_range)
         else:
-            self.price = low + (self.ratio * swing_range)
+            self.price = low + (self.ratio * swing_range) if is_uptrend else high - (self.ratio * swing_range)
         return self.price
 
 
