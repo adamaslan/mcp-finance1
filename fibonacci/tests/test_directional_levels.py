@@ -46,3 +46,13 @@ def test_context_uses_trend_direction():
     levels = ctx.get_fib_levels(50)
     high, low = df["High"].iloc[-50:].max(), df["Low"].iloc[-50:].min()
     assert levels["RETRACE_618"].price == pytest.approx(high - 0.618 * (high - low))
+
+
+def test_direction_uses_bar_position_not_index_labels():
+    import pandas as pd
+    from fibonacci.analysis.swing_detector import SwingPointDetector
+
+    closes = [100 + i for i in range(60)]  # up-leg in bar order
+    df = pd.DataFrame({"High": [c + 1 for c in closes], "Low": [c - 1 for c in closes]},
+                      index=list(range(59, -1, -1)))  # labels descend while time ascends
+    assert SwingPointDetector(df).get_trend_direction(50) == "UP"

@@ -89,9 +89,10 @@ class FibonacciContext:
             return {}
 
         levels = self.fib_registry.get_all_levels()
+        is_uptrend = self.swing_detector.get_trend_direction(window) == 'UP'
 
         for level in levels.values():
-            level.calculate_price(low, high, is_uptrend=low_idx < high_idx)
+            level.calculate_price(low, high, is_uptrend=is_uptrend)
 
         self._swing_data[window] = {
             'high': high,

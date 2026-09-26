@@ -62,10 +62,13 @@ class SwingPointDetector:
         Returns:
             'UP' if uptrend, 'DOWN' if downtrend
         """
-        high_val, low_val, high_idx, low_idx = self.detect_swings(window)
-
-        # If low came before high, likely uptrend
-        if low_idx < high_idx:
+        # Compare bar positions, not index labels: labels may be timestamps or
+        # integers in any order, and only position says which extreme came first.
+        if window > len(self.df):
+            window = len(self.df)
+        high_pos = int(self.df['High'].iloc[-window:].to_numpy().argmax())
+        low_pos = int(self.df['Low'].iloc[-window:].to_numpy().argmin())
+        if low_pos < high_pos:
             return 'UP'
         return 'DOWN'
 
