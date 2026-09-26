@@ -99,6 +99,8 @@ class FibonacciContext:
             'low': low,
             'high_idx': high_idx,
             'low_idx': low_idx,
+            'is_uptrend': is_uptrend,
+            'anchor': self.swing_detector.anchor_source(window),
             'range': swing_range,
             'levels': levels
         }

@@ -1133,6 +1133,13 @@ async def analyze_fibonacci(
     registry = FibonacciLevelRegistry()
     fib_levels = context.get_fib_levels(window)
 
+    # Report the anchors the levels were actually built from (confirmed pivots
+    # when a qualifying leg exists), not the window extremes computed above.
+    swing_data = context.get_swing_data(window)
+    if swing_data:
+        swing_high, swing_low = float(swing_data["high"]), float(swing_data["low"])
+        swing_range = swing_high - swing_low
+
     # Convert to DataFrame for vectorized operations
     levels_data = []
     for key, level in fib_levels.items():
@@ -1414,6 +1421,8 @@ async def analyze_fibonacci(
         "swingHigh": swing_high,
         "swingLow": swing_low,
         "swingRange": swing_range,
+        "swingAnchor": swing_data.get("anchor", "window_extremes"),
+        "swingDirection": "UP" if swing_data.get("is_uptrend") else "DOWN",
         "levels": all_levels[:50],  # Return top 50 levels
         "signals": signals[:100],   # Return top 100 signals
         "clusters": clusters,
