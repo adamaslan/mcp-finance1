@@ -185,3 +185,7 @@ OPTION_SPREAD_WIDTH_ATR: Final[float] = 1.5  # Spread width as ATR multiple (was
 # ✓ lookback_days: 90 → 180 (robust signal validation)
 # ✓ Options DTE: 30-45 → 35-60 days (swing duration)
 # ✓ Options delta: narrower → wider (more flexibility)
+
+# Detector budget (imported by signals.py)
+DETECTOR_TIMEOUT_MS: Final[int] = 500       # wall-clock ms per detector (sync)
+MAX_DETECTOR_FAILURES: Final[int] = 4       # failures before verdict marked degraded
