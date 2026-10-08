@@ -3,7 +3,7 @@ Cloud Function: Calculate Technical Indicators
 Location: option2-gcp/cloud-functions/calculate_indicators/main.py
 
 Triggered by: Pub/Sub topic "analyze-request"
-Purpose: Fetch data from Finnhub (primary) / Alpha Vantage (fallback) and calculate technical indicators
+Purpose: Fetch data from Alpaca (primary) / Alpha Vantage (fallback) and calculate technical indicators
 """
 
 import base64
@@ -51,21 +51,17 @@ def calculate_indicators(event, context):
     print(f"📊 Processing {symbol} (period: {period})")
     
     try:
-        # Fetch data from Finnhub (primary) / Alpha Vantage (fallback)
+        # Fetch data from Alpaca (primary) / Alpha Vantage (fallback)
         if FinnhubAlphaDataFetcher is None:
             raise ImportError("FinnhubAlphaDataFetcher not available")
 
-        finnhub_key = os.getenv("FINNHUB_API_KEY", "")
         av_key = os.getenv("ALPHA_VANTAGE_KEY", "")
 
-        if not finnhub_key:
-            raise ValueError("FINNHUB_API_KEY environment variable not set")
+        if not (os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_API_SECRET")):
+            raise ValueError("ALPACA_API_KEY and ALPACA_API_SECRET environment variables not set")
 
         # Create data fetcher with caching
-        fetcher = FinnhubAlphaDataFetcher(
-            finnhub_key=finnhub_key,
-            alpha_vantage_key=av_key
-        )
+        fetcher = FinnhubAlphaDataFetcher(alpha_vantage_key=av_key)
         cached_fetcher = CachedDataFetcher(fetcher)
 
         # Fetch data

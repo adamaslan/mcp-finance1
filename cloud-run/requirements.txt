@@ -13,8 +13,9 @@ google-cloud-logging==3.8.0
 numpy>=1.24.0
 pandas>=2.0.0
 
-# Finance Data APIs (Finnhub primary, Alpha Vantage fallback, yfinance last resort)
-finnhub-python>=2.4.19
+# Finance Data APIs (Alpaca primary, Alpha Vantage fallback, yfinance local-only)
+requests>=2.31.0
+boto3>=1.34.0
 alpha-vantage>=2.3.1
 yfinance>=0.2.31
 

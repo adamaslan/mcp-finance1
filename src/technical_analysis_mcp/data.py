@@ -1,7 +1,7 @@
 """Data fetching and caching for market data.
 
-Provides abstractions for fetching stock data from Finnhub (primary),
-Alpha Vantage (second), and yfinance (last resort fallback) with
+Provides abstractions for fetching stock data from Alpaca (primary),
+Alpha Vantage (intraday and second), and yfinance (local-only last resort) with
 caching, retry logic, and proper error handling.
 """
 
@@ -11,11 +11,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
-import finnhub
 import httpx
 import pandas as pd
 from cachetools import TTLCache
 
+from . import alpaca_md
 from .config import (
     CACHE_MAX_SIZE,
     CACHE_TTL_SECONDS,
@@ -29,19 +29,23 @@ from .exceptions import DataFetchError, InsufficientDataError, InvalidSymbolErro
 
 logger = logging.getLogger(__name__)
 
-# Map yfinance-style periods to (Finnhub resolution, lookback days)
-_PERIOD_TO_FINNHUB: dict[str, tuple[str, int]] = {
-    "1d": ("5", 1),        # 5-min bars for 1 day
-    "5d": ("15", 5),       # 15-min bars for 5 days
-    "1mo": ("D", 30),      # daily bars for 1 month
-    "3mo": ("D", 90),      # daily bars for 3 months
-    "6mo": ("D", 180),     # daily bars for 6 months
-    "1y": ("D", 365),      # daily bars for 1 year
-    "2y": ("W", 730),      # weekly bars for 2 years
-    "5y": ("W", 1825),     # weekly bars for 5 years
-    "10y": ("M", 3650),    # monthly bars for 10 years
-    "ytd": ("D", 365),     # daily bars, will be trimmed to YTD
-    "max": ("W", 7300),    # weekly bars for ~20 years
+# Map yfinance-style periods to (lookback days, resample rule). Alpaca serves daily
+# bars; longer periods are resampled from them. Intraday periods go to Alpha Vantage.
+_PERIOD_TO_ALPACA: dict[str, tuple[int, str | None]] = {
+    "1mo": (30, None),
+    "3mo": (90, None),
+    "6mo": (180, None),
+    "1y": (365, None),
+    "2y": (730, "W-FRI"),
+    "5y": (1825, "W-FRI"),
+    "10y": (3650, "ME"),
+    "ytd": (365, None),
+    "max": (7300, "W-FRI"),
+}
+_INTRADAY_PERIODS = {"1d": 1, "5d": 5}
+_LOOKBACK_DAYS: dict[str, int] = {
+    **{p: d for p, (d, _) in _PERIOD_TO_ALPACA.items()},
+    **_INTRADAY_PERIODS,
 }
 
 # Alpha Vantage function mapping by period
@@ -87,12 +91,12 @@ class DataFetcher(Protocol):
 
 
 class FinnhubAlphaDataFetcher:
-    """Fetches OHLCV data from Finnhub (primary) with Alpha Vantage + yfinance fallback.
+    """Fetches OHLCV data from Alpaca (primary) with Alpha Vantage + yfinance fallback.
 
     Implements the DataFetcher protocol with 3-source fallback chain:
-    1. Finnhub (primary, most reliable)
+    1. Alpaca (primary; daily bars, resampled for long periods)
     2. Alpha Vantage (fallback, limited free tier)
-    3. yfinance (last resort, rate-limited but free)
+    3. yfinance (last resort, local runs only; Yahoo blocks cloud IPs)
     """
 
     def __init__(
@@ -105,22 +109,17 @@ class FinnhubAlphaDataFetcher:
         """Initialize the data fetcher.
 
         Args:
-            finnhub_key: Finnhub API key (from env if not provided).
+            finnhub_key: Unused; kept for call-site compatibility (Finnhub candles are paid).
             alpha_vantage_key: Alpha Vantage API key (from env if not provided).
             max_retries: Maximum retry attempts on failure.
             backoff_seconds: Base backoff time between retries.
         """
-        self._finnhub_key = finnhub_key or os.getenv("FINNHUB_API_KEY", "")
         self._alpha_vantage_key = alpha_vantage_key or os.getenv("ALPHA_VANTAGE_KEY", "")
         self._max_retries = max_retries
         self._backoff = backoff_seconds
 
-        # Initialize Finnhub client if key available
-        if self._finnhub_key:
-            self._finnhub = finnhub.Client(api_key=self._finnhub_key)
-        else:
-            self._finnhub = None
-            logger.warning("FINNHUB_API_KEY not set - Finnhub data fetching will fail")
+        if not alpaca_md.is_configured():
+            logger.warning("ALPACA_API_KEY/ALPACA_API_SECRET not set - Alpaca data fetching is off")
 
         # Initialize HTTP client for Alpha Vantage
         self._http = httpx.Client(timeout=30)
@@ -130,7 +129,7 @@ class FinnhubAlphaDataFetcher:
         self._yf_min_interval: float = 2.0
 
     def fetch(self, symbol: str, period: str = DEFAULT_PERIOD) -> pd.DataFrame:
-        """Fetch OHLCV data with 3-source fallback: Finnhub → AV → yfinance.
+        """Fetch OHLCV data with 3-source fallback: Alpaca → AV → yfinance (local only).
 
         Args:
             symbol: Ticker symbol (e.g., 'AAPL').
@@ -158,24 +157,26 @@ class FinnhubAlphaDataFetcher:
 
         for attempt in range(1, self._max_retries + 1):
             try:
-                # Try Finnhub first
-                df = self._fetch_finnhub(symbol, period)
+                df = self._fetch_alpaca(symbol, period)
                 if df is not None and not df.empty:
-                    return self._validate_and_return(df, symbol, period, "finnhub")
+                    return self._validate_and_return(df, symbol, period, "alpaca")
+                if period in _PERIOD_TO_ALPACA:
+                    alpaca_md.warn_fallback(f"{period} bars", [symbol], "no Alpaca bars")
 
                 # Fall back to Alpha Vantage
                 df = self._fetch_alpha_vantage(symbol, period)
                 if df is not None and not df.empty:
                     return self._validate_and_return(df, symbol, period, "alpha_vantage")
 
-                # Last resort: yfinance
-                df = self._fetch_yfinance(symbol, period)
-                if df is not None and not df.empty:
-                    return self._validate_and_return(df, symbol, period, "yfinance")
+                # Last resort: yfinance, never from a cloud host (Yahoo blocks those IPs)
+                if not alpaca_md.on_datacenter_host():
+                    df = self._fetch_yfinance(symbol, period)
+                    if df is not None and not df.empty:
+                        return self._validate_and_return(df, symbol, period, "yfinance")
 
                 raise DataFetchError(
                     symbol, period,
-                    "Finnhub, Alpha Vantage, and yfinance all failed",
+                    "Alpaca, Alpha Vantage, and yfinance (local only) all failed",
                 )
 
             except (DataFetchError, InsufficientDataError):
@@ -225,8 +226,10 @@ class FinnhubAlphaDataFetcher:
         )
         return df
 
-    def _fetch_finnhub(self, symbol: str, period: str) -> pd.DataFrame | None:
-        """Fetch OHLCV data from Finnhub stock candles API.
+    def _fetch_alpaca(self, symbol: str, period: str) -> pd.DataFrame | None:
+        """Fetch daily bars from Alpaca (SIP, split-adjusted), resampled for long periods.
+
+        Intraday periods are not served here; they fall through to Alpha Vantage.
 
         Args:
             symbol: Ticker symbol.
@@ -235,50 +238,32 @@ class FinnhubAlphaDataFetcher:
         Returns:
             DataFrame with OHLCV data or None on failure.
         """
-        if not self._finnhub:
+        mapping = _PERIOD_TO_ALPACA.get(period)
+        if not mapping or not alpaca_md.is_configured():
             return None
 
-        mapping = _PERIOD_TO_FINNHUB.get(period)
-        if not mapping:
-            return None
-
-        resolution, lookback_days = mapping
-        now = int(time.time())
-        from_ts = now - (lookback_days * 86400)
-
+        lookback_days, resample_rule = mapping
         try:
-            raw = self._finnhub.stock_candles(symbol, resolution, from_ts, now)
-        except Exception as e:
-            logger.info("Finnhub candle fetch failed for %s/%s: %s", symbol, period, e)
+            frames = alpaca_md.daily_bars_frames([symbol], days=lookback_days)
+        except (alpaca_md.AlpacaError, OSError) as e:
+            logger.warning("Alpaca bars failed for %s/%s: %s", symbol, period, e)
             return None
 
-        if not isinstance(raw, dict) or raw.get("s") != "ok":
-            logger.info("Finnhub returned no data for %s/%s", symbol, period)
+        df = frames.get(symbol)
+        if df is None or df.empty:
             return None
 
-        timestamps = raw.get("t", [])
-        if not timestamps:
-            return None
+        if resample_rule:
+            df = df.resample(resample_rule).agg({
+                "Open": "first", "High": "max", "Low": "min",
+                "Close": "last", "Volume": "sum",
+            }).dropna(subset=["Close"])
 
-        df = pd.DataFrame({
-            "Open": raw.get("o", []),
-            "High": raw.get("h", []),
-            "Low": raw.get("l", []),
-            "Close": raw.get("c", []),
-            "Volume": raw.get("v", []),
-        })
-
-        df.index = pd.to_datetime(
-            [datetime.fromtimestamp(ts, tz=timezone.utc) for ts in timestamps]
-        )
-        df.index.name = "Date"
-
-        # Trim to YTD if requested
         if period == "ytd":
-            year_start = datetime(datetime.now().year, 1, 1, tzinfo=timezone.utc)
-            df = df[df.index >= year_start]
+            df = df[df.index >= pd.Timestamp(datetime.now().year, 1, 1)]
 
-        logger.info("Finnhub: %d candles for %s/%s", len(df), symbol, period)
+        df.index.name = "Date"
+        logger.info("Alpaca: %d bars for %s/%s", len(df), symbol, period)
         return df
 
     def _fetch_alpha_vantage(self, symbol: str, period: str) -> pd.DataFrame | None:
@@ -350,9 +335,8 @@ class FinnhubAlphaDataFetcher:
         df = df.set_index("Date")
 
         # Trim based on period lookback
-        finnhub_mapping = _PERIOD_TO_FINNHUB.get(period)
-        if finnhub_mapping:
-            _, lookback_days = finnhub_mapping
+        lookback_days = _LOOKBACK_DAYS.get(period)
+        if lookback_days:
             cutoff = pd.Timestamp.now() - pd.Timedelta(days=lookback_days)
             df = df[df.index >= cutoff]
 
@@ -366,7 +350,7 @@ class FinnhubAlphaDataFetcher:
     def _fetch_yfinance(self, symbol: str, period: str) -> pd.DataFrame | None:
         """Fetch OHLCV data from yfinance as last-resort fallback.
 
-        Used when both Finnhub and Alpha Vantage fail.
+        Used when both Alpaca and Alpha Vantage fail, on local hosts only.
 
         Args:
             symbol: Ticker symbol.
@@ -435,11 +419,8 @@ class CachedDataFetcher:
             cache_size: Maximum number of items in cache.
         """
         if fetcher is None:
-            finnhub_key = os.getenv("FINNHUB_API_KEY", "")
-            alpha_vantage_key = os.getenv("ALPHA_VANTAGE_KEY", "")
             fetcher = FinnhubAlphaDataFetcher(
-                finnhub_key=finnhub_key,
-                alpha_vantage_key=alpha_vantage_key,
+                alpha_vantage_key=os.getenv("ALPHA_VANTAGE_KEY", ""),
             )
         self._fetcher = fetcher
         self._cache: TTLCache[str, pd.DataFrame] = TTLCache(maxsize=cache_size, ttl=cache_ttl)
@@ -543,7 +524,7 @@ class AnalysisResultCache:
 def create_data_fetcher(use_cache: bool = True) -> DataFetcher:
     """Factory function to create a data fetcher.
 
-    Reads FINNHUB_API_KEY and ALPHA_VANTAGE_KEY from environment variables.
+    Reads ALPACA_API_KEY/ALPACA_API_SECRET and ALPHA_VANTAGE_KEY from environment variables.
 
     Args:
         use_cache: Whether to use caching.
@@ -554,19 +535,15 @@ def create_data_fetcher(use_cache: bool = True) -> DataFetcher:
     Raises:
         RuntimeError: If required API keys are not set.
     """
-    finnhub_key = os.getenv("FINNHUB_API_KEY", "")
     alpha_vantage_key = os.getenv("ALPHA_VANTAGE_KEY", "")
 
-    if not finnhub_key and not alpha_vantage_key:
+    if not alpaca_md.is_configured() and not alpha_vantage_key:
         raise RuntimeError(
-            "At least one of FINNHUB_API_KEY or ALPHA_VANTAGE_KEY must be set. "
+            "Set ALPACA_API_KEY and ALPACA_API_SECRET (primary) or ALPHA_VANTAGE_KEY. "
             "See .env.example for required configuration."
         )
 
-    fetcher = FinnhubAlphaDataFetcher(
-        finnhub_key=finnhub_key,
-        alpha_vantage_key=alpha_vantage_key,
-    )
+    fetcher = FinnhubAlphaDataFetcher(alpha_vantage_key=alpha_vantage_key)
 
     if use_cache:
         return CachedDataFetcher(fetcher)
